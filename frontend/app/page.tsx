@@ -19,6 +19,7 @@ export default function Home() {
     () => (selectedProject ? `${API_BASE_URL}/api/projects/${selectedProject.id}/download` : "#"),
     [selectedProject],
   );
+  const hasCompletedVideo = selectedProject?.status === "completed" || jobStatus === "completed";
 
   async function refreshProjects() {
     const loaded = await api.listProjects();
@@ -54,7 +55,7 @@ export default function Home() {
         setJobStatus(job.status);
         if (job.status === "completed" || job.status === "failed") {
           window.clearInterval(timer);
-          setMessage(job.status === "completed" ? "Video is ready." : job.error_message || "Render failed.");
+          setMessage(job.status === "completed" ? "" : job.error_message || "Render failed.");
           await refreshProjects();
         }
       } catch (error) {
@@ -211,7 +212,7 @@ export default function Home() {
                   <FileUp size={16} />
                   <span>Render video</span>
                 </button>
-                {selectedProject.status === "completed" && (
+                {hasCompletedVideo && (
                   <a className="inline-flex items-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-sm font-medium" href={downloadUrl}>
                     <Download size={16} />
                     <span>Download</span>
@@ -224,7 +225,7 @@ export default function Home() {
           {(message || jobStatus) && (
             <div className="mb-4 rounded-lg border border-slate-200 bg-white p-4 text-sm shadow-sm">
               {message && <div>{message}</div>}
-              {jobStatus && (
+              {jobStatus && jobStatus !== "completed" && (
                 <div className="mt-2">
                   <div className="mb-1 flex justify-between text-xs text-slate-500">
                     <span>{jobStatus}</span>
@@ -234,6 +235,15 @@ export default function Home() {
                     <div className="h-2 rounded-full bg-emerald-600" style={{width: `${jobProgress}%`}} />
                   </div>
                 </div>
+              )}
+              {jobStatus === "completed" && selectedProject && (
+                <a
+                  className="inline-flex items-center gap-2 rounded-md bg-emerald-700 px-3 py-2 text-sm font-medium text-white"
+                  href={downloadUrl}
+                >
+                  <Download size={16} />
+                  <span>Download video</span>
+                </a>
               )}
             </div>
           )}
