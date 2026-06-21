@@ -1,6 +1,6 @@
 # VoxSlide
 
-Dockerized MVP for turning a presentation PDF plus per-page transcripts into a narrated MP4 video.
+Dockerized solution for turning a presentation PDF plus per-page transcripts into a narrated MP4 video.
 
 ## Stack
 
