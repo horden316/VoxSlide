@@ -6,7 +6,7 @@ Dockerized solution for turning a presentation PDF plus per-page transcripts int
 
 - Frontend: Next.js, React, TypeScript, Tailwind CSS
 - Backend: FastAPI, SQLite, SQLAlchemy
-- Media: PyMuPDF for PDF rendering, OpenAI TTS, FFmpeg/ffprobe for video assembly
+- Media: PyMuPDF for PDF rendering, local Qwen TTS or OpenAI TTS, FFmpeg/ffprobe for video assembly
 
 ## Setup
 
@@ -14,7 +14,11 @@ Dockerized solution for turning a presentation PDF plus per-page transcripts int
 cp .env.example .env
 ```
 
-Edit `.env` and set `OPENAI_API_KEY` before generating audio or rendering videos. Do not commit real keys.
+By default this branch runs a local `qwen-tts` service using `Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice`. The backend calls `QWEN_TTS_ENDPOINT` with a JSON `POST` containing `text`, `input`, `model`, `voice`, and `response_format`, then stores the returned MP3 bytes.
+
+The bundled Qwen service exposes the CustomVoice speakers `Ryan`, `Aiden`, `Vivian`, `Serena`, `Uncle_Fu`, `Dylan`, `Eric`, `Ono_Anna`, and `Sohee`. On Apple Silicon Docker this runs on CPU by default, so first audio generation can be slow while the model downloads and loads.
+
+To use OpenAI TTS instead, set `TTS_PROVIDER=openai` and set `OPENAI_API_KEY`. Do not commit real keys.
 
 ## Run
 

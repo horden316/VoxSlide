@@ -8,9 +8,14 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./storage/app.db"
     storage_dir: Path = Path("./storage")
     backend_cors_origins: str = "http://localhost:3000"
+    tts_provider: str = "qwen_local"
     openai_api_key: str | None = None
     openai_tts_model: str = "gpt-4o-mini-tts"
     openai_tts_voice: str = "alloy"
+    qwen_tts_endpoint: str | None = "http://localhost:7860/tts"
+    qwen_tts_model: str = "Qwen/Qwen3-TTS"
+    qwen_tts_voice: str = "default"
+    qwen_tts_voices: str = "default:Default,narrator:Narrator,warm:Warm,bright:Bright"
     video_width: int = Field(default=1920)
     video_height: int = Field(default=1080)
 

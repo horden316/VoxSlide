@@ -33,6 +33,13 @@ export type Job = {
   updated_at: string;
 };
 
+export type TtsConfig = {
+  provider: string;
+  model: string;
+  default_voice: string;
+  voices: {id: string; label: string}[];
+};
+
 async function parseResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
     const payload = await response.json().catch(() => null);
@@ -57,6 +64,9 @@ export const api = {
   async getPages(projectId: number) {
     return parseResponse<SlidePage[]>(await fetch(`${API_BASE_URL}/api/projects/${projectId}/pages`));
   },
+  async getTtsConfig() {
+    return parseResponse<TtsConfig>(await fetch(`${API_BASE_URL}/api/tts/config`));
+  },
   async uploadPdf(projectId: number, file: File) {
     const form = new FormData();
     form.append("file", file);
@@ -71,11 +81,32 @@ export const api = {
       }),
     );
   },
-  async generateAudio(pageId: number) {
-    return parseResponse<SlidePage>(await fetch(`${API_BASE_URL}/api/pages/${pageId}/generate-audio`, {method: "POST"}));
+  async generateAudio(pageId: number, voice?: string) {
+    return parseResponse<SlidePage>(
+      await fetch(`${API_BASE_URL}/api/pages/${pageId}/generate-audio`, {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({voice}),
+      }),
+    );
   },
-  async renderVideo(projectId: number) {
-    return parseResponse<{job_id: number}>(await fetch(`${API_BASE_URL}/api/projects/${projectId}/render-video`, {method: "POST"}));
+  async generateAudioJob(pageId: number, voice?: string) {
+    return parseResponse<{job_id: number}>(
+      await fetch(`${API_BASE_URL}/api/pages/${pageId}/generate-audio-job`, {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({voice}),
+      }),
+    );
+  },
+  async renderVideo(projectId: number, voice?: string) {
+    return parseResponse<{job_id: number}>(
+      await fetch(`${API_BASE_URL}/api/projects/${projectId}/render-video`, {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({voice}),
+      }),
+    );
   },
   async getJob(jobId: number) {
     return parseResponse<Job>(await fetch(`${API_BASE_URL}/api/jobs/${jobId}`));

@@ -22,6 +22,14 @@ class PagePatch(BaseModel):
     transcript: str
 
 
+class GenerateAudioRequest(BaseModel):
+    voice: str | None = None
+
+
+class RenderVideoRequest(BaseModel):
+    voice: str | None = None
+
+
 class PageOut(BaseModel):
     id: int
     project_id: int
@@ -49,3 +57,15 @@ class JobOut(BaseModel):
 
 class JobCreated(BaseModel):
     job_id: int
+
+
+class TtsVoiceOut(BaseModel):
+    id: str
+    label: str
+
+
+class TtsConfigOut(BaseModel):
+    provider: str
+    model: str
+    default_voice: str
+    voices: list[TtsVoiceOut]

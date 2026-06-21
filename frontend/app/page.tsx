@@ -2,7 +2,16 @@
 
 import {useEffect, useMemo, useState} from "react";
 import {Download, FileUp, Play, Plus, RefreshCw, Save, Upload} from "lucide-react";
-import {API_BASE_URL, Project, SlidePage, api} from "@/lib/api";
+import {API_BASE_URL, api} from "@/lib/api";
+import type {Job, Project, SlidePage, TtsConfig} from "@/lib/api";
+
+type AudioJobState = {
+  id: number;
+  pageId: number;
+  pageNumber: number;
+  status: string;
+  progress: number;
+};
 
 export default function Home() {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -14,12 +23,21 @@ export default function Home() {
   const [jobId, setJobId] = useState<number | null>(null);
   const [jobProgress, setJobProgress] = useState(0);
   const [jobStatus, setJobStatus] = useState("");
+  const [ttsConfig, setTtsConfig] = useState<TtsConfig | null>(null);
+  const [selectedVoice, setSelectedVoice] = useState("");
+  const [audioJob, setAudioJob] = useState<AudioJobState | null>(null);
 
   const downloadUrl = useMemo(
     () => (selectedProject ? `${API_BASE_URL}/api/projects/${selectedProject.id}/download` : "#"),
     [selectedProject],
   );
   const hasCompletedVideo = selectedProject?.status === "completed" || jobStatus === "completed";
+
+  function audioSource(page: SlidePage) {
+    if (!page.audio_url) return "";
+    const version = encodeURIComponent(`${page.updated_at}-${page.audio_duration ?? ""}`);
+    return `${API_BASE_URL}${page.audio_url}?v=${version}`;
+  }
 
   async function refreshProjects() {
     const loaded = await api.listProjects();
@@ -38,6 +56,13 @@ export default function Home() {
 
   useEffect(() => {
     refreshProjects().catch((error) => setMessage(error.message));
+    api
+      .getTtsConfig()
+      .then((config) => {
+        setTtsConfig(config);
+        setSelectedVoice(config.default_voice);
+      })
+      .catch((error) => setMessage(error.message));
   }, []);
 
   useEffect(() => {
@@ -64,6 +89,37 @@ export default function Home() {
     }, 1500);
     return () => window.clearInterval(timer);
   }, [jobId]);
+
+  useEffect(() => {
+    if (!audioJob) return;
+    const timer = window.setInterval(async () => {
+      try {
+        const job = await api.getJob(audioJob.id);
+        setAudioJob((current) => (current && current.id === job.id ? jobToAudioState(job, current) : current));
+        if (job.status === "completed" || job.status === "failed") {
+          window.clearInterval(timer);
+          setMessage(job.status === "completed" ? `Page ${audioJob.pageNumber} audio generated.` : job.error_message || "Audio generation failed.");
+          if (job.status === "completed") {
+            await refreshPages();
+          }
+          setAudioJob(null);
+        }
+      } catch (error) {
+        setMessage(error instanceof Error ? error.message : "Could not load audio job.");
+        window.clearInterval(timer);
+        setAudioJob(null);
+      }
+    }, 1500);
+    return () => window.clearInterval(timer);
+  }, [audioJob?.id]);
+
+  function jobToAudioState(job: Job, current: AudioJobState): AudioJobState {
+    return {
+      ...current,
+      status: job.status,
+      progress: job.progress,
+    };
+  }
 
   async function createProject() {
     if (!title.trim()) return;
@@ -116,9 +172,9 @@ export default function Home() {
     }
     try {
       await api.saveTranscript(page.id, page.transcript);
-      const updated = await api.generateAudio(page.id);
-      setPages((current) => current.map((item) => (item.id === page.id ? updated : item)));
-      setMessage(`Page ${page.page_number} audio generated.`);
+      const job = await api.generateAudioJob(page.id, selectedVoice);
+      setAudioJob({id: job.job_id, pageId: page.id, pageNumber: page.page_number, status: "queued", progress: 0});
+      setMessage(`Page ${page.page_number} audio generation started.`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Audio generation failed.");
     }
@@ -137,7 +193,7 @@ export default function Home() {
     try {
       const savedPages = await Promise.all(pages.map((page) => api.saveTranscript(page.id, page.transcript)));
       setPages(savedPages);
-      const job = await api.renderVideo(selectedProject.id);
+      const job = await api.renderVideo(selectedProject.id, selectedVoice);
       setJobId(job.job_id);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Render failed to start.");
@@ -203,6 +259,23 @@ export default function Home() {
             </div>
             {selectedProject && (
               <div className="flex items-center gap-2">
+                {ttsConfig && (
+                  <label className="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium">
+                    <span className="text-slate-500">Voice</span>
+                    <select
+                      className="bg-transparent text-sm outline-none"
+                      value={selectedVoice}
+                      onChange={(event) => setSelectedVoice(event.target.value)}
+                      title={`TTS provider: ${ttsConfig.provider}, model: ${ttsConfig.model}`}
+                    >
+                      {ttsConfig.voices.map((voice) => (
+                        <option key={voice.id} value={voice.id}>
+                          {voice.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
                 <label className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium">
                   <Upload size={16} />
                   <span>Upload PDF</span>
@@ -265,9 +338,13 @@ export default function Home() {
                           <Save size={16} />
                           <span>Save</span>
                         </button>
-                        <button className="inline-flex items-center gap-2 rounded-md bg-emerald-700 px-3 py-2 text-sm text-white" onClick={() => generateAudio(page)}>
+                        <button
+                          className="inline-flex items-center gap-2 rounded-md bg-emerald-700 px-3 py-2 text-sm text-white disabled:opacity-60"
+                          onClick={() => generateAudio(page)}
+                          disabled={Boolean(audioJob)}
+                        >
                           <Play size={16} />
-                          <span>Audio</span>
+                          <span>{audioJob?.pageId === page.id ? "Generating" : "Audio"}</span>
                         </button>
                       </div>
                     </div>
@@ -279,8 +356,19 @@ export default function Home() {
                       }
                       placeholder="Transcript for this slide"
                     />
+                    {audioJob?.pageId === page.id && (
+                      <div className="mt-3">
+                        <div className="mb-1 flex justify-between text-xs text-slate-500">
+                          <span>{audioJob.status}</span>
+                          <span>{audioJob.progress}%</span>
+                        </div>
+                        <div className="h-2 rounded-full bg-slate-200">
+                          <div className="h-2 rounded-full bg-emerald-600" style={{width: `${audioJob.progress}%`}} />
+                        </div>
+                      </div>
+                    )}
                     {page.audio_url && (
-                      <audio className="mt-3 w-full" controls src={`${API_BASE_URL}${page.audio_url}`}>
+                      <audio key={audioSource(page)} className="mt-3 w-full" controls src={audioSource(page)}>
                         <track kind="captions" />
                       </audio>
                     )}

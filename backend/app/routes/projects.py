@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from ..config import get_settings
 from ..database import SessionLocal, get_db
 from ..models import Job, Page, Project
-from ..schemas import JobCreated, ProjectCreate, ProjectOut
+from ..schemas import JobCreated, ProjectCreate, ProjectOut, RenderVideoRequest
 from ..services.pdf_service import PdfService
 from ..services.tts_service import TtsService
 from ..services.video_service import VideoService
@@ -74,7 +74,12 @@ def upload_pdf(project_id: int, file: UploadFile = File(...), db: Session = Depe
 
 
 @router.post("/{project_id}/render-video", response_model=JobCreated)
-def render_video(project_id: int, background_tasks: BackgroundTasks, db: Session = Depends(get_db)) -> JobCreated:
+def render_video(
+    project_id: int,
+    background_tasks: BackgroundTasks,
+    payload: RenderVideoRequest | None = None,
+    db: Session = Depends(get_db),
+) -> JobCreated:
     project = db.get(Project, project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -89,7 +94,7 @@ def render_video(project_id: int, background_tasks: BackgroundTasks, db: Session
     db.add(job)
     db.commit()
     db.refresh(job)
-    background_tasks.add_task(run_render_video_job, job.id)
+    background_tasks.add_task(run_render_video_job, job.id, payload.voice if payload else None)
     return JobCreated(job_id=job.id)
 
 
@@ -115,7 +120,7 @@ def update_job(db: Session, job: Job, status: str | None = None, progress: int |
     db.refresh(job)
 
 
-def run_render_video_job(job_id: int) -> None:
+def run_render_video_job(job_id: int, voice: str | None = None) -> None:
     db = SessionLocal()
     tts = TtsService()
     video = VideoService()
@@ -141,7 +146,7 @@ def run_render_video_job(job_id: int) -> None:
             audio_path = safe_storage_path(page.audio_path) if page.audio_path else None
             if not audio_path or not audio_path.exists():
                 audio_path = audio_dir / f"page-{page.page_number:04d}.mp3"
-                tts.synthesize(page.transcript, audio_path)
+                tts.synthesize(page.transcript, audio_path, voice)
                 page.audio_path = str(audio_path)
                 page.audio_duration = video.probe_duration(audio_path)
             completed += 1

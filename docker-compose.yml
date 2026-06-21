@@ -1,4 +1,16 @@
 services:
+  qwen-tts:
+    build:
+      context: ./qwen_tts_service
+    environment:
+      - QWEN_TTS_MODEL=${QWEN_TTS_MODEL:-Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice}
+      - QWEN_TTS_DEVICE=${QWEN_TTS_DEVICE:-cpu}
+      - QWEN_TTS_ATTN_IMPLEMENTATION=${QWEN_TTS_ATTN_IMPLEMENTATION:-eager}
+    volumes:
+      - ./storage/models:/models
+    ports:
+      - "7860:7860"
+
   backend:
     build:
       context: ./backend
@@ -9,12 +21,19 @@ services:
       - DATABASE_URL=sqlite:////app/storage/app.db
       - STORAGE_DIR=/app/storage
       - BACKEND_CORS_ORIGINS=${BACKEND_CORS_ORIGINS:-http://localhost:3000}
+      - TTS_PROVIDER=${TTS_PROVIDER:-qwen_local}
+      - QWEN_TTS_ENDPOINT=${QWEN_TTS_ENDPOINT:-http://qwen-tts:7860/tts}
+      - QWEN_TTS_MODEL=${QWEN_TTS_MODEL:-Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice}
+      - QWEN_TTS_VOICE=${QWEN_TTS_VOICE:-Ryan}
+      - QWEN_TTS_VOICES=${QWEN_TTS_VOICES:-Ryan:Ryan,Aiden:Aiden,Vivian:Vivian,Serena:Serena,Uncle_Fu:Uncle Fu,Dylan:Dylan,Eric:Eric,Ono_Anna:Ono Anna,Sohee:Sohee}
       - OPENAI_TTS_MODEL=${OPENAI_TTS_MODEL:-gpt-4o-mini-tts}
       - OPENAI_TTS_VOICE=${OPENAI_TTS_VOICE:-alloy}
     volumes:
       - ./storage:/app/storage
     ports:
       - "8000:8000"
+    depends_on:
+      - qwen-tts
 
   frontend:
     build:
