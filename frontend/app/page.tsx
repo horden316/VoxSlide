@@ -39,13 +39,13 @@ export default function Home() {
     return `${API_BASE_URL}${page.audio_url}?v=${version}`;
   }
 
-  async function refreshProjects() {
+  async function refreshProjects(preferredProjectId = selectedProject?.id) {
     const loaded = await api.listProjects();
     setProjects(loaded);
-    if (!selectedProject && loaded.length > 0) {
+    if (preferredProjectId) {
+      setSelectedProject(loaded.find((project) => project.id === preferredProjectId) || selectedProject);
+    } else if (loaded.length > 0) {
       setSelectedProject(loaded[0]);
-    } else if (selectedProject) {
-      setSelectedProject(loaded.find((project) => project.id === selectedProject.id) || selectedProject);
     }
   }
 
@@ -129,7 +129,7 @@ export default function Home() {
       const project = await api.createProject(title);
       setTitle("");
       setSelectedProject(project);
-      await refreshProjects();
+      await refreshProjects(project.id);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Project creation failed.");
     } finally {
