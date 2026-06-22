@@ -1,4 +1,23 @@
-export const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
+const configuredApiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
+const loopbackHosts = new Set(["localhost", "127.0.0.1", "::1"]);
+
+function resolveApiBaseUrl() {
+  if (typeof window === "undefined") {
+    return configuredApiBaseUrl.replace(/\/$/, "");
+  }
+
+  try {
+    const apiUrl = new URL(configuredApiBaseUrl);
+    if (loopbackHosts.has(apiUrl.hostname) && !loopbackHosts.has(window.location.hostname)) {
+      apiUrl.hostname = window.location.hostname;
+    }
+    return apiUrl.toString().replace(/\/$/, "");
+  } catch {
+    return configuredApiBaseUrl.replace(/\/$/, "");
+  }
+}
+
+export const API_BASE_URL = resolveApiBaseUrl();
 
 export type Project = {
   id: number;

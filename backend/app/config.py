@@ -7,7 +7,7 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     database_url: str = "sqlite:///./storage/app.db"
     storage_dir: Path = Path("./storage")
-    backend_cors_origins: str = "http://localhost:3000"
+    backend_cors_origins: str = "*"
     tts_provider: str = "qwen_local"
     openai_api_key: str | None = None
     openai_tts_model: str = "gpt-4o-mini-tts"

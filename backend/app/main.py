@@ -12,10 +12,11 @@ settings = get_settings()
 app = FastAPI(title="VoxSlide API")
 
 origins = [origin.strip() for origin in settings.backend_cors_origins.split(",") if origin.strip()]
+allow_all_origins = "*" in origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=True,
+    allow_origins=["*"] if allow_all_origins else origins,
+    allow_credentials=not allow_all_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )

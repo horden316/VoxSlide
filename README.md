@@ -30,6 +30,10 @@ docker compose up --build
 - Backend: http://localhost:8000
 - API docs: http://localhost:8000/docs
 
+When opening the frontend from another machine, use the server host, for example
+`http://172.17.14.8:3000`. The frontend will rewrite the default
+`http://localhost:8000` API URL to the same host on port `8000` in the browser.
+
 Uploaded PDFs, rendered page images, audio, SQLite DB, and final videos are stored in `./storage`.
 
 ## Manual Test
