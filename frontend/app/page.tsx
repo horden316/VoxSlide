@@ -3,7 +3,7 @@
 import {useEffect, useMemo, useState} from "react";
 import {Download, FileUp, Play, Plus, RefreshCw, Save, Upload} from "lucide-react";
 import {API_BASE_URL, api} from "@/lib/api";
-import type {Job, Project, SlidePage, TtsConfig} from "@/lib/api";
+import type {Job, Project, SlidePage, TtsConfig, TtsOptions} from "@/lib/api";
 
 type AudioJobState = {
   id: number;
@@ -12,6 +12,71 @@ type AudioJobState = {
   status: string;
   progress: number;
 };
+
+const tonePresets = [
+  {
+    id: "professional",
+    label: "Professional presentation",
+    instruct:
+      "Speak in a natural, clear, and confident business presentation style. Keep the tone professional, composed, and easy to follow without sounding theatrical.",
+  },
+  {
+    id: "teaching",
+    label: "Teaching explanation",
+    instruct:
+      "Speak in a patient, clear, and approachable teaching style. Emphasize important concepts gently and make the explanation easy to understand.",
+  },
+  {
+    id: "warm",
+    label: "Warm and friendly",
+    instruct:
+      "Speak in a warm, friendly, and natural style. Keep the voice soft but clear, as if explaining the content to colleagues.",
+  },
+  {
+    id: "formal",
+    label: "Formal and steady",
+    instruct:
+      "Speak in a steady, formal, and trustworthy style. Keep the delivery measured, composed, and free from excessive emotion.",
+  },
+  {
+    id: "energetic",
+    label: "Energetic and natural",
+    instruct:
+      "Speak in an energetic, natural, and engaging style. Keep the pronunciation clear and avoid an exaggerated advertising tone.",
+  },
+];
+
+const speedPresets = [
+  {
+    id: "slow",
+    label: "Slower",
+    instruct: "Use a slightly slower pace with natural pauses between sentences.",
+  },
+  {
+    id: "medium",
+    label: "Medium",
+    instruct: "Use a moderate speaking pace with natural pauses.",
+  },
+  {
+    id: "fast",
+    label: "Slightly faster",
+    instruct: "Use a slightly faster pace while keeping every sentence clear and easy to understand.",
+  },
+];
+
+const languageOptions = [
+  {id: "", label: "Speaker default"},
+  {id: "Chinese", label: "Chinese"},
+  {id: "English", label: "English"},
+  {id: "Japanese", label: "Japanese"},
+  {id: "Korean", label: "Korean"},
+];
+
+function buildInstruct(toneId: string, speedId: string) {
+  const tone = tonePresets.find((preset) => preset.id === toneId) || tonePresets[0];
+  const speed = speedPresets.find((preset) => preset.id === speedId) || speedPresets[1];
+  return `${tone.instruct} ${speed.instruct}`;
+}
 
 export default function Home() {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -25,6 +90,10 @@ export default function Home() {
   const [jobStatus, setJobStatus] = useState("");
   const [ttsConfig, setTtsConfig] = useState<TtsConfig | null>(null);
   const [selectedVoice, setSelectedVoice] = useState("");
+  const [selectedLanguage, setSelectedLanguage] = useState("");
+  const [selectedTonePreset, setSelectedTonePreset] = useState(tonePresets[0].id);
+  const [selectedSpeedPreset, setSelectedSpeedPreset] = useState(speedPresets[1].id);
+  const [voiceInstruct, setVoiceInstruct] = useState(() => buildInstruct(tonePresets[0].id, speedPresets[1].id));
   const [audioJob, setAudioJob] = useState<AudioJobState | null>(null);
 
   const downloadUrl = useMemo(
@@ -47,6 +116,24 @@ export default function Home() {
     } else if (loaded.length > 0) {
       setSelectedProject(loaded[0]);
     }
+  }
+
+  function ttsOptions(): TtsOptions {
+    return {
+      voice: selectedVoice || undefined,
+      language: selectedLanguage || undefined,
+      instruct: voiceInstruct.trim() || undefined,
+    };
+  }
+
+  function updateTonePreset(presetId: string) {
+    setSelectedTonePreset(presetId);
+    setVoiceInstruct(buildInstruct(presetId, selectedSpeedPreset));
+  }
+
+  function updateSpeedPreset(presetId: string) {
+    setSelectedSpeedPreset(presetId);
+    setVoiceInstruct(buildInstruct(selectedTonePreset, presetId));
   }
 
   async function refreshPages(projectId = selectedProject?.id) {
@@ -172,7 +259,7 @@ export default function Home() {
     }
     try {
       await api.saveTranscript(page.id, page.transcript);
-      const job = await api.generateAudioJob(page.id, selectedVoice);
+      const job = await api.generateAudioJob(page.id, ttsOptions());
       setAudioJob({id: job.job_id, pageId: page.id, pageNumber: page.page_number, status: "queued", progress: 0});
       setMessage(`Page ${page.page_number} audio generation started.`);
     } catch (error) {
@@ -193,7 +280,7 @@ export default function Home() {
     try {
       const savedPages = await Promise.all(pages.map((page) => api.saveTranscript(page.id, page.transcript)));
       setPages(savedPages);
-      const job = await api.renderVideo(selectedProject.id, selectedVoice);
+      const job = await api.renderVideo(selectedProject.id, ttsOptions());
       setJobId(job.job_id);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Render failed to start.");
@@ -232,7 +319,7 @@ export default function Home() {
           <div className="mt-4 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
             <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
               <span className="text-sm font-medium">Projects</span>
-              <button className="text-slate-500" onClick={refreshProjects} title="Refresh projects">
+              <button className="text-slate-500" onClick={() => refreshProjects()} title="Refresh projects">
                 <RefreshCw size={16} />
               </button>
             </div>
@@ -259,23 +346,6 @@ export default function Home() {
             </div>
             {selectedProject && (
               <div className="flex items-center gap-2">
-                {ttsConfig && (
-                  <label className="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium">
-                    <span className="text-slate-500">Voice</span>
-                    <select
-                      className="bg-transparent text-sm outline-none"
-                      value={selectedVoice}
-                      onChange={(event) => setSelectedVoice(event.target.value)}
-                      title={`TTS provider: ${ttsConfig.provider}, model: ${ttsConfig.model}`}
-                    >
-                      {ttsConfig.voices.map((voice) => (
-                        <option key={voice.id} value={voice.id}>
-                          {voice.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                )}
                 <label className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium">
                   <Upload size={16} />
                   <span>Upload PDF</span>
@@ -294,6 +364,86 @@ export default function Home() {
               </div>
             )}
           </div>
+
+          {selectedProject && ttsConfig && (
+            <div className="mb-4 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <div className="text-sm font-medium text-slate-900">Voice style</div>
+                  <div className="text-xs text-slate-500">
+                    {ttsConfig.provider} / {ttsConfig.model}
+                  </div>
+                </div>
+                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                  <label className="text-xs font-medium text-slate-600">
+                    Voice
+                    <select
+                      className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2 py-2 text-sm text-slate-900 outline-none focus:border-slate-700"
+                      value={selectedVoice}
+                      onChange={(event) => setSelectedVoice(event.target.value)}
+                    >
+                      {ttsConfig.voices.map((voice) => (
+                        <option key={voice.id} value={voice.id}>
+                          {voice.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="text-xs font-medium text-slate-600">
+                    Language
+                    <select
+                      className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2 py-2 text-sm text-slate-900 outline-none focus:border-slate-700"
+                      value={selectedLanguage}
+                      onChange={(event) => setSelectedLanguage(event.target.value)}
+                    >
+                      {languageOptions.map((language) => (
+                        <option key={language.id} value={language.id}>
+                          {language.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="text-xs font-medium text-slate-600">
+                    Tone preset
+                    <select
+                      className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2 py-2 text-sm text-slate-900 outline-none focus:border-slate-700"
+                      value={selectedTonePreset}
+                      onChange={(event) => updateTonePreset(event.target.value)}
+                    >
+                      {tonePresets.map((preset) => (
+                        <option key={preset.id} value={preset.id}>
+                          {preset.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="text-xs font-medium text-slate-600">
+                    Speed prompt
+                    <select
+                      className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2 py-2 text-sm text-slate-900 outline-none focus:border-slate-700"
+                      value={selectedSpeedPreset}
+                      onChange={(event) => updateSpeedPreset(event.target.value)}
+                    >
+                      {speedPresets.map((preset) => (
+                        <option key={preset.id} value={preset.id}>
+                          {preset.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+              </div>
+              <label className="block text-xs font-medium text-slate-600">
+                Instruct prompt
+                <textarea
+                  className="mt-1 min-h-24 w-full resize-y rounded-md border border-slate-300 p-3 text-sm text-slate-900 outline-none focus:border-slate-700"
+                  value={voiceInstruct}
+                  onChange={(event) => setVoiceInstruct(event.target.value)}
+                  placeholder="Describe the delivery style, tone, pacing, and speaking context."
+                />
+              </label>
+            </div>
+          )}
 
           {(message || jobStatus) && (
             <div className="mb-4 rounded-lg border border-slate-200 bg-white p-4 text-sm shadow-sm">

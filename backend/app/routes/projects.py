@@ -16,6 +16,13 @@ from ..storage import project_dir, safe_storage_path, unique_filename
 router = APIRouter(prefix="/api/projects", tags=["projects"])
 
 
+def clean_tts_value(value: str | None) -> str | None:
+    if value is None:
+        return None
+    cleaned = value.strip()
+    return cleaned or None
+
+
 @router.post("", response_model=ProjectOut)
 def create_project(payload: ProjectCreate, db: Session = Depends(get_db)) -> Project:
     title = payload.title.strip()
@@ -94,7 +101,13 @@ def render_video(
     db.add(job)
     db.commit()
     db.refresh(job)
-    background_tasks.add_task(run_render_video_job, job.id, payload.voice if payload else None)
+    background_tasks.add_task(
+        run_render_video_job,
+        job.id,
+        clean_tts_value(payload.voice) if payload else None,
+        clean_tts_value(payload.language) if payload else None,
+        clean_tts_value(payload.instruct) if payload else None,
+    )
     return JobCreated(job_id=job.id)
 
 
@@ -120,7 +133,12 @@ def update_job(db: Session, job: Job, status: str | None = None, progress: int |
     db.refresh(job)
 
 
-def run_render_video_job(job_id: int, voice: str | None = None) -> None:
+def run_render_video_job(
+    job_id: int,
+    voice: str | None = None,
+    language: str | None = None,
+    instruct: str | None = None,
+) -> None:
     db = SessionLocal()
     tts = TtsService()
     video = VideoService()
@@ -143,12 +161,10 @@ def run_render_video_job(job_id: int, voice: str | None = None) -> None:
         completed = 0
 
         for page in pages:
-            audio_path = safe_storage_path(page.audio_path) if page.audio_path else None
-            if not audio_path or not audio_path.exists():
-                audio_path = audio_dir / f"page-{page.page_number:04d}.mp3"
-                tts.synthesize(page.transcript, audio_path, voice)
-                page.audio_path = str(audio_path)
-                page.audio_duration = video.probe_duration(audio_path)
+            audio_path = audio_dir / f"page-{page.page_number:04d}.mp3"
+            tts.synthesize(page.transcript, audio_path, voice, language, instruct)
+            page.audio_path = str(audio_path)
+            page.audio_duration = video.probe_duration(audio_path)
             completed += 1
             update_job(db, job, progress=int(completed / total_steps * 100))
 

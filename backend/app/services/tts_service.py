@@ -34,41 +34,63 @@ class TtsService:
         settings = get_settings()
         return settings.qwen_tts_model if settings.tts_provider == "qwen_local" else settings.openai_tts_model
 
-    def synthesize(self, text: str, output_path: Path, voice: str | None = None) -> Path:
+    def synthesize(
+        self,
+        text: str,
+        output_path: Path,
+        voice: str | None = None,
+        language: str | None = None,
+        instruct: str | None = None,
+    ) -> Path:
         settings = get_settings()
         output_path.parent.mkdir(parents=True, exist_ok=True)
         selected_voice = voice or self.default_voice
         if settings.tts_provider == "qwen_local":
-            return self._synthesize_qwen_local(text, output_path, selected_voice)
-        return self._synthesize_openai(text, output_path, selected_voice)
+            return self._synthesize_qwen_local(text, output_path, selected_voice, language, instruct)
+        return self._synthesize_openai(text, output_path, selected_voice, instruct)
 
-    def _synthesize_openai(self, text: str, output_path: Path, voice: str) -> Path:
+    def _synthesize_openai(self, text: str, output_path: Path, voice: str, instruct: str | None = None) -> Path:
         settings = get_settings()
         if not settings.openai_api_key:
             raise RuntimeError("OPENAI_API_KEY is not configured")
         client = OpenAI(api_key=settings.openai_api_key)
+        speech_args = {
+            "model": settings.openai_tts_model,
+            "voice": voice,
+            "input": text,
+            "response_format": "mp3",
+        }
+        if instruct:
+            speech_args["instructions"] = instruct
         with client.audio.speech.with_streaming_response.create(
-            model=settings.openai_tts_model,
-            voice=voice,
-            input=text,
-            response_format="mp3",
+            **speech_args,
         ) as response:
             response.stream_to_file(output_path)
         return output_path
 
-    def _synthesize_qwen_local(self, text: str, output_path: Path, voice: str) -> Path:
+    def _synthesize_qwen_local(
+        self,
+        text: str,
+        output_path: Path,
+        voice: str,
+        language: str | None = None,
+        instruct: str | None = None,
+    ) -> Path:
         settings = get_settings()
         if not settings.qwen_tts_endpoint:
             raise RuntimeError("QWEN_TTS_ENDPOINT is not configured")
-        payload = json.dumps(
-            {
-                "text": text,
-                "input": text,
-                "model": settings.qwen_tts_model,
-                "voice": voice,
-                "response_format": "mp3",
-            }
-        ).encode("utf-8")
+        request_payload = {
+            "text": text,
+            "input": text,
+            "model": settings.qwen_tts_model,
+            "voice": voice,
+            "response_format": "mp3",
+        }
+        if language:
+            request_payload["language"] = language
+        if instruct:
+            request_payload["instruct"] = instruct
+        payload = json.dumps(request_payload).encode("utf-8")
         req = request.Request(
             settings.qwen_tts_endpoint,
             data=payload,

@@ -59,6 +59,12 @@ export type TtsConfig = {
   voices: {id: string; label: string}[];
 };
 
+export type TtsOptions = {
+  voice?: string;
+  language?: string;
+  instruct?: string;
+};
+
 async function parseResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
     const payload = await response.json().catch(() => null);
@@ -100,30 +106,30 @@ export const api = {
       }),
     );
   },
-  async generateAudio(pageId: number, voice?: string) {
+  async generateAudio(pageId: number, options?: TtsOptions) {
     return parseResponse<SlidePage>(
       await fetch(`${API_BASE_URL}/api/pages/${pageId}/generate-audio`, {
         method: "POST",
         headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({voice}),
+        body: JSON.stringify(options || {}),
       }),
     );
   },
-  async generateAudioJob(pageId: number, voice?: string) {
+  async generateAudioJob(pageId: number, options?: TtsOptions) {
     return parseResponse<{job_id: number}>(
       await fetch(`${API_BASE_URL}/api/pages/${pageId}/generate-audio-job`, {
         method: "POST",
         headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({voice}),
+        body: JSON.stringify(options || {}),
       }),
     );
   },
-  async renderVideo(projectId: number, voice?: string) {
+  async renderVideo(projectId: number, options?: TtsOptions) {
     return parseResponse<{job_id: number}>(
       await fetch(`${API_BASE_URL}/api/projects/${projectId}/render-video`, {
         method: "POST",
         headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({voice}),
+        body: JSON.stringify(options || {}),
       }),
     );
   },

@@ -24,10 +24,14 @@ class PagePatch(BaseModel):
 
 class GenerateAudioRequest(BaseModel):
     voice: str | None = None
+    language: str | None = None
+    instruct: str | None = None
 
 
 class RenderVideoRequest(BaseModel):
     voice: str | None = None
+    language: str | None = None
+    instruct: str | None = None
 
 
 class PageOut(BaseModel):

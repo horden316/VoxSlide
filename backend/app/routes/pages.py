@@ -12,6 +12,13 @@ from ..storage import project_dir, public_file_url
 router = APIRouter(tags=["pages"])
 
 
+def clean_tts_value(value: str | None) -> str | None:
+    if value is None:
+        return None
+    cleaned = value.strip()
+    return cleaned or None
+
+
 def serialize_page(page: Page) -> PageOut:
     return PageOut(
         id=page.id,
@@ -67,7 +74,13 @@ def generate_audio(page_id: int, payload: GenerateAudioRequest | None = None, db
         raise HTTPException(status_code=400, detail="Transcript is required before generating audio")
     audio_path = project_dir(page.project_id) / "audio" / f"page-{page.page_number:04d}.mp3"
     try:
-        TtsService().synthesize(page.transcript, audio_path, payload.voice if payload else None)
+        TtsService().synthesize(
+            page.transcript,
+            audio_path,
+            clean_tts_value(payload.voice) if payload else None,
+            clean_tts_value(payload.language) if payload else None,
+            clean_tts_value(payload.instruct) if payload else None,
+        )
     except RuntimeError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     page.audio_path = str(audio_path)
@@ -93,7 +106,14 @@ def generate_audio_job(
     db.add(job)
     db.commit()
     db.refresh(job)
-    background_tasks.add_task(run_generate_audio_job, job.id, page.id, payload.voice if payload else None)
+    background_tasks.add_task(
+        run_generate_audio_job,
+        job.id,
+        page.id,
+        clean_tts_value(payload.voice) if payload else None,
+        clean_tts_value(payload.language) if payload else None,
+        clean_tts_value(payload.instruct) if payload else None,
+    )
     return JobCreated(job_id=job.id)
 
 
@@ -108,7 +128,13 @@ def update_audio_job(db: Session, job: Job, status: str | None = None, progress:
     db.refresh(job)
 
 
-def run_generate_audio_job(job_id: int, page_id: int, voice: str | None = None) -> None:
+def run_generate_audio_job(
+    job_id: int,
+    page_id: int,
+    voice: str | None = None,
+    language: str | None = None,
+    instruct: str | None = None,
+) -> None:
     db = SessionLocal()
     try:
         job = db.get(Job, job_id)
@@ -121,7 +147,7 @@ def run_generate_audio_job(job_id: int, page_id: int, voice: str | None = None) 
 
         audio_path = project_dir(page.project_id) / "audio" / f"page-{page.page_number:04d}.mp3"
         update_audio_job(db, job, progress=20)
-        TtsService().synthesize(page.transcript, audio_path, voice)
+        TtsService().synthesize(page.transcript, audio_path, voice, language, instruct)
         update_audio_job(db, job, progress=85)
         page.audio_path = str(audio_path)
         page.audio_duration = VideoService().probe_duration(audio_path)
