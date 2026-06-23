@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     qwen_tts_voices: str = "Ryan:Ryan,Aiden:Aiden,Vivian:Vivian,Serena:Serena,Uncle_Fu:Uncle Fu,Dylan:Dylan,Eric:Eric,Ono_Anna:Ono Anna,Sohee:Sohee"
     video_width: int = Field(default=1920)
     video_height: int = Field(default=1080)
+    video_encoder: str = "h264_nvenc"
 
 
 @lru_cache

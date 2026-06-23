@@ -1,6 +1,8 @@
 from pathlib import Path
 import subprocess
 
+from ..config import get_settings
+
 
 class VideoService:
     def _run(self, command: list[str]) -> None:
@@ -30,6 +32,8 @@ class VideoService:
 
     def render_segment(self, image_path: Path, audio_path: Path, output_path: Path) -> Path:
         output_path.parent.mkdir(parents=True, exist_ok=True)
+        settings = get_settings()
+        video_options = self._video_encoder_options(settings.video_encoder)
         self._run(
             [
                 "ffmpeg",
@@ -40,10 +44,7 @@ class VideoService:
                 str(image_path),
                 "-i",
                 str(audio_path),
-                "-c:v",
-                "libx264",
-                "-tune",
-                "stillimage",
+                *video_options,
                 "-c:a",
                 "aac",
                 "-b:a",
@@ -55,6 +56,13 @@ class VideoService:
             ]
         )
         return output_path
+
+    def _video_encoder_options(self, encoder: str) -> list[str]:
+        if encoder == "h264_nvenc":
+            return ["-c:v", "h264_nvenc", "-preset", "p5", "-cq", "19"]
+        if encoder == "libx264":
+            return ["-c:v", "libx264", "-tune", "stillimage"]
+        return ["-c:v", encoder]
 
     def concat_segments(self, segments: list[Path], output_path: Path) -> Path:
         list_path = output_path.parent / "segments.txt"

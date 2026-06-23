@@ -35,8 +35,10 @@ services:
       - QWEN_TTS_VOICES=${QWEN_TTS_VOICES:-Ryan:Ryan,Aiden:Aiden,Vivian:Vivian,Serena:Serena,Uncle_Fu:Uncle Fu,Dylan:Dylan,Eric:Eric,Ono_Anna:Ono Anna,Sohee:Sohee}
       - OPENAI_TTS_MODEL=${OPENAI_TTS_MODEL:-gpt-4o-mini-tts}
       - OPENAI_TTS_VOICE=${OPENAI_TTS_VOICE:-alloy}
+      - VIDEO_ENCODER=${VIDEO_ENCODER:-h264_nvenc}
     volumes:
       - ./storage:/app/storage
+    gpus: all
     ports:
       - "8000:8000"
     depends_on:
