@@ -11,7 +11,7 @@ from pydantic import BaseModel
 import soundfile as sf
 
 
-MODEL_ID = os.getenv("QWEN_TTS_MODEL", "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice")
+MODEL_ID = os.getenv("QWEN_TTS_MODEL", "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice")
 DEVICE = os.getenv("QWEN_TTS_DEVICE", "cpu")
 ATTN_IMPLEMENTATION = os.getenv("QWEN_TTS_ATTN_IMPLEMENTATION", "eager")
 DEFAULT_INSTRUCT = os.getenv("QWEN_TTS_INSTRUCT", "Speak in a neutral, consistent, clear voice.")

@@ -14,7 +14,7 @@ Dockerized solution for turning a presentation PDF plus per-page transcripts int
 cp .env.example .env
 ```
 
-By default this branch runs a local `qwen-tts` service using `Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice`. The backend calls `QWEN_TTS_ENDPOINT` with a JSON `POST` containing `text`, `input`, `model`, `voice`, and `response_format`, then stores the returned MP3 bytes.
+By default this branch runs a local `qwen-tts` service using `Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice`, the largest CustomVoice checkpoint in the Qwen3-TTS collection. The backend calls `QWEN_TTS_ENDPOINT` with a JSON `POST` containing `text`, `input`, `model`, `voice`, and `response_format`, then stores the returned MP3 bytes.
 
 The bundled Qwen service exposes the CustomVoice speakers `Ryan`, `Aiden`, `Vivian`, `Serena`, `Uncle_Fu`, `Dylan`, `Eric`, `Ono_Anna`, and `Sohee`. On Apple Silicon Docker this runs on CPU by default, so first audio generation can be slow while the model downloads and loads.
 
