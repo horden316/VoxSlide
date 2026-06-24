@@ -30,6 +30,7 @@ SUBTALKER_TOP_P = float(os.getenv("QWEN_TTS_SUBTALKER_TOP_P", "1.0"))
 SUBTALKER_TEMPERATURE = float(os.getenv("QWEN_TTS_SUBTALKER_TEMPERATURE", "0.7"))
 MAX_CHARS_PER_CHUNK = int(os.getenv("QWEN_TTS_MAX_CHARS_PER_CHUNK", "120"))
 CHUNK_SILENCE_MS = int(os.getenv("QWEN_TTS_CHUNK_SILENCE_MS", "300"))
+MAX_BATCH_CHUNKS = int(os.getenv("QWEN_TTS_MAX_BATCH_CHUNKS", "3"))
 
 logger = logging.getLogger("qwen_tts_service")
 logging.basicConfig(level=logging.INFO)
@@ -156,6 +157,11 @@ def find_split_position(text: str, max_chars: int) -> int:
     return max_chars
 
 
+def chunked(items: list[str], size: int) -> list[list[str]]:
+    batch_size = max(size, 1)
+    return [items[index : index + batch_size] for index in range(0, len(items), batch_size)]
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok", "model": MODEL_ID}
@@ -190,13 +196,14 @@ def tts(payload: TtsRequest) -> Response:
             set_generation_seed()
             audio_chunks = []
             sr = None
-            for index, chunk in enumerate(chunks, start=1):
-                chunk_started_at = time.perf_counter()
+            completed_chunks = 0
+            for batch_index, batch in enumerate(chunked(chunks, MAX_BATCH_CHUNKS), start=1):
+                batch_started_at = time.perf_counter()
                 wavs, chunk_sr = qwen_model.generate_custom_voice(
-                    text=chunk,
-                    language=language,
-                    speaker=speaker,
-                    instruct=payload.instruct or speaker_config["instruct"],
+                    text=batch,
+                    language=[language] * len(batch),
+                    speaker=[speaker] * len(batch),
+                    instruct=[payload.instruct or speaker_config["instruct"]] * len(batch),
                     do_sample=DO_SAMPLE,
                     top_k=TOP_K,
                     top_p=TOP_P,
@@ -208,14 +215,16 @@ def tts(payload: TtsRequest) -> Response:
                     subtalker_temperature=SUBTALKER_TEMPERATURE,
                 )
                 sr = chunk_sr
-                audio_chunks.append(wavs[0])
+                audio_chunks.extend(wavs)
+                completed_chunks += len(batch)
                 logger.info(
-                    "Generated TTS chunk %s/%s speaker=%s chars=%s elapsed=%.2fs",
-                    index,
-                    len(chunks),
+                    "Generated TTS chunk batch %s speaker=%s chunks=%s/%s chars=%s elapsed=%.2fs",
+                    batch_index,
                     speaker,
-                    len(chunk),
-                    time.perf_counter() - chunk_started_at,
+                    completed_chunks,
+                    len(chunks),
+                    sum(len(chunk) for chunk in batch),
+                    time.perf_counter() - batch_started_at,
                 )
             silence = np.zeros(int((sr or 24000) * CHUNK_SILENCE_MS / 1000), dtype=np.float32)
             wav_parts: list[np.ndarray] = []
