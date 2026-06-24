@@ -143,6 +143,9 @@ class VideoService:
             remaining = remaining[split_at:].strip()
         if remaining:
             chunks.append(remaining)
+        if len(chunks) > 1 and len(chunks[-1]) < 16 and len(chunks[-2]) + len(chunks[-1]) + 1 <= 64:
+            chunks[-2] = f"{chunks[-2]} {chunks[-1]}"
+            chunks.pop()
         return chunks
 
     def _caption_split_position(self, text: str, max_chars: int) -> int:
