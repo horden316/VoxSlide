@@ -29,7 +29,7 @@ SUBTALKER_TOP_K = int(os.getenv("QWEN_TTS_SUBTALKER_TOP_K", "50"))
 SUBTALKER_TOP_P = float(os.getenv("QWEN_TTS_SUBTALKER_TOP_P", "1.0"))
 SUBTALKER_TEMPERATURE = float(os.getenv("QWEN_TTS_SUBTALKER_TEMPERATURE", "0.7"))
 MAX_CHARS_PER_CHUNK = int(os.getenv("QWEN_TTS_MAX_CHARS_PER_CHUNK", "120"))
-CHUNK_SILENCE_MS = int(os.getenv("QWEN_TTS_CHUNK_SILENCE_MS", "120"))
+CHUNK_SILENCE_MS = int(os.getenv("QWEN_TTS_CHUNK_SILENCE_MS", "300"))
 
 logger = logging.getLogger("qwen_tts_service")
 logging.basicConfig(level=logging.INFO)
@@ -218,7 +218,12 @@ def tts(payload: TtsRequest) -> Response:
                     time.perf_counter() - chunk_started_at,
                 )
             silence = np.zeros(int((sr or 24000) * CHUNK_SILENCE_MS / 1000), dtype=np.float32)
-            wav = np.concatenate([part for chunk in audio_chunks for part in (chunk, silence)]) if audio_chunks else np.array([], dtype=np.float32)
+            wav_parts: list[np.ndarray] = []
+            for index, chunk in enumerate(audio_chunks):
+                wav_parts.append(chunk)
+                if index < len(audio_chunks) - 1:
+                    wav_parts.append(silence)
+            wav = np.concatenate(wav_parts) if wav_parts else np.array([], dtype=np.float32)
             logger.info("Generated TTS speaker=%s chars=%s chunks=%s elapsed=%.2fs", speaker, len(text), len(chunks), time.perf_counter() - started_at)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Qwen TTS generation failed: {exc}") from exc
