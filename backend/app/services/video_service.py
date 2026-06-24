@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 import subprocess
 
 from ..config import get_settings
@@ -86,3 +87,77 @@ class VideoService:
             ]
         )
         return output_path
+
+    def write_srt(self, captions: list[tuple[str, float]], output_path: Path) -> Path:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        position = 0.0
+        entries: list[str] = []
+        cue_index = 1
+        for text, duration in captions:
+            chunks = self._split_caption_text(text)
+            if not chunks:
+                position += max(duration, 0.0)
+                continue
+            chunk_weights = [max(len(chunk), 1) for chunk in chunks]
+            total_weight = sum(chunk_weights)
+            cue_start = position
+            caption_end = position + max(duration, 0.0)
+            for chunk_position, (chunk, weight) in enumerate(zip(chunks, chunk_weights), start=1):
+                cue_duration = max(duration, 0.0) * weight / total_weight
+                cue_end = cue_start + cue_duration
+                if chunk_position == len(chunks):
+                    cue_end = caption_end
+                entries.append(
+                    "\n".join(
+                        [
+                            str(cue_index),
+                            f"{self._format_srt_timestamp(cue_start)} --> {self._format_srt_timestamp(cue_end)}",
+                            chunk,
+                        ]
+                    )
+                )
+                cue_index += 1
+                cue_start = cue_end
+            position = caption_end
+        output_path.write_text("\n\n".join(entries) + "\n", encoding="utf-8")
+        return output_path
+
+    def _split_caption_text(self, text: str, max_chars: int = 48) -> list[str]:
+        normalized = re.sub(r"\s+", " ", text.strip())
+        if not normalized:
+            return []
+        sentences = [sentence.strip() for sentence in re.split(r"(?<=[。！？!?；;])\s*", normalized) if sentence.strip()]
+        chunks: list[str] = []
+        for sentence in sentences:
+            chunks.extend(self._wrap_caption_sentence(sentence, max_chars))
+        return chunks
+
+    def _wrap_caption_sentence(self, sentence: str, max_chars: int) -> list[str]:
+        if len(sentence) <= max_chars:
+            return [sentence]
+        chunks: list[str] = []
+        remaining = sentence
+        while len(remaining) > max_chars:
+            split_at = self._caption_split_position(remaining, max_chars)
+            chunks.append(remaining[:split_at].strip())
+            remaining = remaining[split_at:].strip()
+        if remaining:
+            chunks.append(remaining)
+        return chunks
+
+    def _caption_split_position(self, text: str, max_chars: int) -> int:
+        window = text[: max_chars + 1]
+        for pattern in [r"[,，、]\s*", r"\s+"]:
+            matches = list(re.finditer(pattern, window))
+            if matches:
+                split_at = matches[-1].end()
+                if split_at > 0:
+                    return split_at
+        return max_chars
+
+    def _format_srt_timestamp(self, seconds: float) -> str:
+        milliseconds = round(seconds * 1000)
+        hours, remainder = divmod(milliseconds, 3_600_000)
+        minutes, remainder = divmod(remainder, 60_000)
+        whole_seconds, milliseconds = divmod(remainder, 1000)
+        return f"{hours:02d}:{minutes:02d}:{whole_seconds:02d},{milliseconds:03d}"

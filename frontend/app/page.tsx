@@ -1,7 +1,7 @@
 "use client";
 
 import {useEffect, useMemo, useState} from "react";
-import {Download, FileUp, Play, Plus, RefreshCw, Save, Upload} from "lucide-react";
+import {Download, FileText, FileUp, Play, Plus, RefreshCw, Save, Upload} from "lucide-react";
 import {API_BASE_URL, api} from "@/lib/api";
 import type {Job, Project, SlidePage, TtsConfig, TtsOptions} from "@/lib/api";
 
@@ -98,6 +98,10 @@ export default function Home() {
 
   const downloadUrl = useMemo(
     () => (selectedProject ? `${API_BASE_URL}/api/projects/${selectedProject.id}/download` : "#"),
+    [selectedProject],
+  );
+  const subtitleDownloadUrl = useMemo(
+    () => (selectedProject ? `${API_BASE_URL}/api/projects/${selectedProject.id}/download-srt` : "#"),
     [selectedProject],
   );
   const hasCompletedVideo = selectedProject?.status === "completed" || jobStatus === "completed";
@@ -356,10 +360,16 @@ export default function Home() {
                   <span>Render video</span>
                 </button>
                 {hasCompletedVideo && (
-                  <a className="inline-flex items-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-sm font-medium" href={downloadUrl}>
-                    <Download size={16} />
-                    <span>Download</span>
-                  </a>
+                  <>
+                    <a className="inline-flex items-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-sm font-medium" href={downloadUrl}>
+                      <Download size={16} />
+                      <span>Video</span>
+                    </a>
+                    <a className="inline-flex items-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-sm font-medium" href={subtitleDownloadUrl}>
+                      <FileText size={16} />
+                      <span>SRT</span>
+                    </a>
+                  </>
                 )}
               </div>
             )}
@@ -460,13 +470,22 @@ export default function Home() {
                 </div>
               )}
               {jobStatus === "completed" && selectedProject && (
-                <a
-                  className="inline-flex items-center gap-2 rounded-md bg-emerald-700 px-3 py-2 text-sm font-medium text-white"
-                  href={downloadUrl}
-                >
-                  <Download size={16} />
-                  <span>Download video</span>
-                </a>
+                <div className="flex flex-wrap gap-2">
+                  <a
+                    className="inline-flex items-center gap-2 rounded-md bg-emerald-700 px-3 py-2 text-sm font-medium text-white"
+                    href={downloadUrl}
+                  >
+                    <Download size={16} />
+                    <span>Download video</span>
+                  </a>
+                  <a
+                    className="inline-flex items-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-sm font-medium"
+                    href={subtitleDownloadUrl}
+                  >
+                    <FileText size={16} />
+                    <span>Download SRT</span>
+                  </a>
+                </div>
               )}
             </div>
           )}

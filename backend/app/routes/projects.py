@@ -122,6 +122,17 @@ def download_video(project_id: int, db: Session = Depends(get_db)) -> FileRespon
     return FileResponse(path, media_type="video/mp4", filename=f"project-{project.id}-final.mp4")
 
 
+@router.get("/{project_id}/download-srt")
+def download_subtitle(project_id: int, db: Session = Depends(get_db)) -> FileResponse:
+    project = db.get(Project, project_id)
+    if not project or not project.output_video_path:
+        raise HTTPException(status_code=404, detail="Subtitle not found")
+    path = safe_storage_path(Path(project.output_video_path).with_suffix(".srt"))
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Subtitle file not found")
+    return FileResponse(path, media_type="application/x-subrip", filename=f"project-{project.id}-final.srt")
+
+
 def update_job(db: Session, job: Job, status: str | None = None, progress: int | None = None, error: str | None = None) -> None:
     if status is not None:
         job.status = status
@@ -157,6 +168,7 @@ def run_render_video_job(
         audio_dir = base_dir / "audio"
         segment_dir = base_dir / "segments"
         segments: list[Path] = []
+        captions: list[tuple[str, float]] = []
         total_steps = len(pages) * 2 + 1
         completed = 0
 
@@ -165,6 +177,7 @@ def run_render_video_job(
             tts.synthesize(page.transcript, audio_path, voice, language, instruct)
             page.audio_path = str(audio_path)
             page.audio_duration = video.probe_duration(audio_path)
+            captions.append((page.transcript, page.audio_duration))
             completed += 1
             update_job(db, job, progress=int(completed / total_steps * 100))
 
@@ -176,6 +189,7 @@ def run_render_video_job(
 
         output_path = base_dir / "final.mp4"
         video.concat_segments(segments, output_path)
+        video.write_srt(captions, output_path.with_suffix(".srt"))
         project.output_video_path = str(output_path)
         project.status = "completed"
         update_job(db, job, status="completed", progress=100)
