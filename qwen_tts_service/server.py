@@ -29,6 +29,7 @@ SUBTALKER_TOP_P = float(os.getenv("QWEN_TTS_SUBTALKER_TOP_P", "1.0"))
 SUBTALKER_TEMPERATURE = float(os.getenv("QWEN_TTS_SUBTALKER_TEMPERATURE", "0.7"))
 
 logger = logging.getLogger("qwen_tts_service")
+logging.basicConfig(level=logging.INFO)
 
 SPEAKERS = {
     "Vivian": {"language": "Chinese", "instruct": "用自然清晰的簡報語氣說"},
