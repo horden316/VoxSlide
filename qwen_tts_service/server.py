@@ -31,7 +31,7 @@ SUBTALKER_TEMPERATURE = float(os.getenv("QWEN_TTS_SUBTALKER_TEMPERATURE", "0.7")
 MAX_CHARS_PER_CHUNK = int(os.getenv("QWEN_TTS_MAX_CHARS_PER_CHUNK", "120"))
 CHUNK_SILENCE_MS = int(os.getenv("QWEN_TTS_CHUNK_SILENCE_MS", "300"))
 MAX_BATCH_CHUNKS = int(os.getenv("QWEN_TTS_MAX_BATCH_CHUNKS", "2"))
-MAX_NEW_TOKENS = int(os.getenv("QWEN_TTS_MAX_NEW_TOKENS", "512"))
+MAX_NEW_TOKENS = int(os.getenv("QWEN_TTS_MAX_NEW_TOKENS", "128"))
 
 logger = logging.getLogger("qwen_tts_service")
 logging.basicConfig(level=logging.INFO)
