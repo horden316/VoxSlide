@@ -2,6 +2,8 @@ from io import BytesIO
 import logging
 import os
 import random
+from threading import Lock
+import time
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
@@ -42,6 +44,7 @@ SPEAKERS = {
 
 app = FastAPI(title="Qwen TTS Service")
 model: Any | None = None
+generation_lock = Lock()
 
 
 class TtsRequest(BaseModel):
@@ -104,10 +107,8 @@ def tts(payload: TtsRequest) -> Response:
         raise HTTPException(status_code=400, detail=f"Unsupported speaker: {speaker}")
 
     try:
-        qwen_model = load_model()
-        set_generation_seed()
         logger.info(
-            "Generating TTS speaker=%s language=%s chars=%s seed=%s do_sample=%s subtalker_dosample=%s",
+            "Queueing TTS speaker=%s language=%s chars=%s seed=%s do_sample=%s subtalker_dosample=%s",
             speaker,
             payload.language or speaker_config["language"],
             len(text),
@@ -115,21 +116,26 @@ def tts(payload: TtsRequest) -> Response:
             DO_SAMPLE,
             SUBTALKER_DOSAMPLE,
         )
-        wavs, sr = qwen_model.generate_custom_voice(
-            text=text,
-            language=payload.language or speaker_config["language"],
-            speaker=speaker,
-            instruct=payload.instruct or speaker_config["instruct"],
-            do_sample=DO_SAMPLE,
-            top_k=TOP_K,
-            top_p=TOP_P,
-            temperature=TEMPERATURE,
-            repetition_penalty=REPETITION_PENALTY,
-            subtalker_dosample=SUBTALKER_DOSAMPLE,
-            subtalker_top_k=SUBTALKER_TOP_K,
-            subtalker_top_p=SUBTALKER_TOP_P,
-            subtalker_temperature=SUBTALKER_TEMPERATURE,
-        )
+        with generation_lock:
+            started_at = time.perf_counter()
+            qwen_model = load_model()
+            set_generation_seed()
+            wavs, sr = qwen_model.generate_custom_voice(
+                text=text,
+                language=payload.language or speaker_config["language"],
+                speaker=speaker,
+                instruct=payload.instruct or speaker_config["instruct"],
+                do_sample=DO_SAMPLE,
+                top_k=TOP_K,
+                top_p=TOP_P,
+                temperature=TEMPERATURE,
+                repetition_penalty=REPETITION_PENALTY,
+                subtalker_dosample=SUBTALKER_DOSAMPLE,
+                subtalker_top_k=SUBTALKER_TOP_K,
+                subtalker_top_p=SUBTALKER_TOP_P,
+                subtalker_temperature=SUBTALKER_TEMPERATURE,
+            )
+            logger.info("Generated TTS speaker=%s chars=%s elapsed=%.2fs", speaker, len(text), time.perf_counter() - started_at)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Qwen TTS generation failed: {exc}") from exc
 
