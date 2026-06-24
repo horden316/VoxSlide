@@ -2,6 +2,7 @@ from io import BytesIO
 import logging
 import os
 import random
+import re
 from threading import Lock
 import time
 from typing import Any
@@ -27,6 +28,8 @@ SUBTALKER_DOSAMPLE = os.getenv("QWEN_TTS_SUBTALKER_DOSAMPLE", "false").lower() =
 SUBTALKER_TOP_K = int(os.getenv("QWEN_TTS_SUBTALKER_TOP_K", "50"))
 SUBTALKER_TOP_P = float(os.getenv("QWEN_TTS_SUBTALKER_TOP_P", "1.0"))
 SUBTALKER_TEMPERATURE = float(os.getenv("QWEN_TTS_SUBTALKER_TEMPERATURE", "0.7"))
+MAX_CHARS_PER_CHUNK = int(os.getenv("QWEN_TTS_MAX_CHARS_PER_CHUNK", "120"))
+CHUNK_SILENCE_MS = int(os.getenv("QWEN_TTS_CHUNK_SILENCE_MS", "120"))
 
 logger = logging.getLogger("qwen_tts_service")
 logging.basicConfig(level=logging.INFO)
@@ -91,6 +94,68 @@ def set_generation_seed() -> None:
         torch.cuda.manual_seed_all(SEED)
 
 
+def infer_language(text: str, fallback: str) -> str:
+    cjk_count = len(re.findall(r"[\u4e00-\u9fff]", text))
+    japanese_count = len(re.findall(r"[\u3040-\u30ff]", text))
+    korean_count = len(re.findall(r"[\uac00-\ud7af]", text))
+    ascii_letter_count = len(re.findall(r"[A-Za-z]", text))
+    if japanese_count > max(cjk_count, korean_count, ascii_letter_count // 2):
+        return "Japanese"
+    if korean_count > max(cjk_count, japanese_count, ascii_letter_count // 2):
+        return "Korean"
+    if cjk_count > 0 and cjk_count >= ascii_letter_count // 2:
+        return "Chinese"
+    if ascii_letter_count > 0:
+        return "English"
+    return fallback
+
+
+def split_text(text: str, max_chars: int = MAX_CHARS_PER_CHUNK) -> list[str]:
+    normalized = re.sub(r"\s+", " ", text.strip())
+    if not normalized:
+        return []
+    sentences = [part.strip() for part in re.split(r"(?<=[。！？!?；;.!?])\s*", normalized) if part.strip()]
+    chunks: list[str] = []
+    current = ""
+    for sentence in sentences:
+        if len(sentence) > max_chars:
+            if current:
+                chunks.append(current)
+                current = ""
+            chunks.extend(wrap_text(sentence, max_chars))
+            continue
+        candidate = f"{current} {sentence}".strip()
+        if current and len(candidate) > max_chars:
+            chunks.append(current)
+            current = sentence
+        else:
+            current = candidate
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+def wrap_text(text: str, max_chars: int) -> list[str]:
+    chunks: list[str] = []
+    remaining = text.strip()
+    while len(remaining) > max_chars:
+        split_at = find_split_position(remaining, max_chars)
+        chunks.append(remaining[:split_at].strip())
+        remaining = remaining[split_at:].strip()
+    if remaining:
+        chunks.append(remaining)
+    return chunks
+
+
+def find_split_position(text: str, max_chars: int) -> int:
+    window = text[: max_chars + 1]
+    for pattern in [r"[,，、:：]\s*", r"\s+"]:
+        matches = list(re.finditer(pattern, window))
+        if matches:
+            return matches[-1].end()
+    return max_chars
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok", "model": MODEL_ID}
@@ -108,10 +173,12 @@ def tts(payload: TtsRequest) -> Response:
         raise HTTPException(status_code=400, detail=f"Unsupported speaker: {speaker}")
 
     try:
+        language = payload.language or infer_language(text, speaker_config["language"])
+        chunks = split_text(text)
         logger.info(
             "Queueing TTS speaker=%s language=%s chars=%s seed=%s do_sample=%s subtalker_dosample=%s",
             speaker,
-            payload.language or speaker_config["language"],
+            language,
             len(text),
             SEED,
             DO_SAMPLE,
@@ -121,25 +188,41 @@ def tts(payload: TtsRequest) -> Response:
             started_at = time.perf_counter()
             qwen_model = load_model()
             set_generation_seed()
-            wavs, sr = qwen_model.generate_custom_voice(
-                text=text,
-                language=payload.language or speaker_config["language"],
-                speaker=speaker,
-                instruct=payload.instruct or speaker_config["instruct"],
-                do_sample=DO_SAMPLE,
-                top_k=TOP_K,
-                top_p=TOP_P,
-                temperature=TEMPERATURE,
-                repetition_penalty=REPETITION_PENALTY,
-                subtalker_dosample=SUBTALKER_DOSAMPLE,
-                subtalker_top_k=SUBTALKER_TOP_K,
-                subtalker_top_p=SUBTALKER_TOP_P,
-                subtalker_temperature=SUBTALKER_TEMPERATURE,
-            )
-            logger.info("Generated TTS speaker=%s chars=%s elapsed=%.2fs", speaker, len(text), time.perf_counter() - started_at)
+            audio_chunks = []
+            sr = None
+            for index, chunk in enumerate(chunks, start=1):
+                chunk_started_at = time.perf_counter()
+                wavs, chunk_sr = qwen_model.generate_custom_voice(
+                    text=chunk,
+                    language=language,
+                    speaker=speaker,
+                    instruct=payload.instruct or speaker_config["instruct"],
+                    do_sample=DO_SAMPLE,
+                    top_k=TOP_K,
+                    top_p=TOP_P,
+                    temperature=TEMPERATURE,
+                    repetition_penalty=REPETITION_PENALTY,
+                    subtalker_dosample=SUBTALKER_DOSAMPLE,
+                    subtalker_top_k=SUBTALKER_TOP_K,
+                    subtalker_top_p=SUBTALKER_TOP_P,
+                    subtalker_temperature=SUBTALKER_TEMPERATURE,
+                )
+                sr = chunk_sr
+                audio_chunks.append(wavs[0])
+                logger.info(
+                    "Generated TTS chunk %s/%s speaker=%s chars=%s elapsed=%.2fs",
+                    index,
+                    len(chunks),
+                    speaker,
+                    len(chunk),
+                    time.perf_counter() - chunk_started_at,
+                )
+            silence = np.zeros(int((sr or 24000) * CHUNK_SILENCE_MS / 1000), dtype=np.float32)
+            wav = np.concatenate([part for chunk in audio_chunks for part in (chunk, silence)]) if audio_chunks else np.array([], dtype=np.float32)
+            logger.info("Generated TTS speaker=%s chars=%s chunks=%s elapsed=%.2fs", speaker, len(text), len(chunks), time.perf_counter() - started_at)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Qwen TTS generation failed: {exc}") from exc
 
     output = BytesIO()
-    sf.write(output, wavs[0], sr, format="MP3")
+    sf.write(output, wav, sr or 24000, format="MP3")
     return Response(content=output.getvalue(), media_type="audio/mpeg")
