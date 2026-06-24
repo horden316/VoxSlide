@@ -31,6 +31,7 @@ SUBTALKER_TEMPERATURE = float(os.getenv("QWEN_TTS_SUBTALKER_TEMPERATURE", "0.7")
 MAX_CHARS_PER_CHUNK = int(os.getenv("QWEN_TTS_MAX_CHARS_PER_CHUNK", "120"))
 CHUNK_SILENCE_MS = int(os.getenv("QWEN_TTS_CHUNK_SILENCE_MS", "300"))
 MAX_BATCH_CHUNKS = int(os.getenv("QWEN_TTS_MAX_BATCH_CHUNKS", "2"))
+MAX_NEW_TOKENS = int(os.getenv("QWEN_TTS_MAX_NEW_TOKENS", "512"))
 
 logger = logging.getLogger("qwen_tts_service")
 logging.basicConfig(level=logging.INFO)
@@ -209,6 +210,7 @@ def tts(payload: TtsRequest) -> Response:
                     top_p=TOP_P,
                     temperature=TEMPERATURE,
                     repetition_penalty=REPETITION_PENALTY,
+                    max_new_tokens=MAX_NEW_TOKENS,
                     subtalker_dosample=SUBTALKER_DOSAMPLE,
                     subtalker_top_k=SUBTALKER_TOP_K,
                     subtalker_top_p=SUBTALKER_TOP_P,
