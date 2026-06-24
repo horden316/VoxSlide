@@ -36,6 +36,7 @@ services:
       - OPENAI_TTS_MODEL=${OPENAI_TTS_MODEL:-gpt-4o-mini-tts}
       - OPENAI_TTS_VOICE=${OPENAI_TTS_VOICE:-alloy}
       - VIDEO_ENCODER=${VIDEO_ENCODER:-h264_nvenc}
+      - VIDEO_SEGMENT_WORKERS=${VIDEO_SEGMENT_WORKERS:-4}
     volumes:
       - ./storage:/app/storage
     gpus: all

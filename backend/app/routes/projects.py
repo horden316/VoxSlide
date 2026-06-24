@@ -1,4 +1,5 @@
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import shutil
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
@@ -167,27 +168,52 @@ def run_render_video_job(
         base_dir = project_dir(project.id)
         audio_dir = base_dir / "audio"
         segment_dir = base_dir / "segments"
-        segments: list[Path] = []
         captions: list[tuple[str, float]] = []
+        render_inputs: list[tuple[int, Path, Path, Path]] = []
         total_steps = len(pages) * 2 + 1
         completed = 0
 
         for page in pages:
             audio_path = audio_dir / f"page-{page.page_number:04d}.mp3"
-            tts.synthesize(page.transcript, audio_path, voice, language, instruct)
-            page.audio_path = str(audio_path)
-            page.audio_duration = video.probe_duration(audio_path)
+            existing_audio_path = safe_storage_path(page.audio_path) if page.audio_path else None
+            if existing_audio_path and existing_audio_path.exists():
+                audio_path = existing_audio_path
+                if page.audio_duration is None:
+                    page.audio_duration = video.probe_duration(audio_path)
+            else:
+                tts.synthesize(page.transcript, audio_path, voice, language, instruct)
+                page.audio_path = str(audio_path)
+                page.audio_duration = video.probe_duration(audio_path)
             captions.append((page.transcript, page.audio_duration))
             completed += 1
             update_job(db, job, progress=int(completed / total_steps * 100))
 
             segment_path = segment_dir / f"page-{page.page_number:04d}.mp4"
-            video.render_segment(safe_storage_path(page.image_path), safe_storage_path(page.audio_path), segment_path)
-            segments.append(segment_path)
-            completed += 1
-            update_job(db, job, progress=int(completed / total_steps * 100))
+            render_inputs.append(
+                (
+                    page.page_number,
+                    safe_storage_path(page.image_path),
+                    safe_storage_path(page.audio_path),
+                    segment_path,
+                )
+            )
+
+        segments_by_page: dict[int, Path] = {}
+        settings = get_settings()
+        max_workers = min(settings.video_segment_workers, len(render_inputs))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {
+                executor.submit(video.render_segment, image_path, audio_path, segment_path): page_number
+                for page_number, image_path, audio_path, segment_path in render_inputs
+            }
+            for future in as_completed(futures):
+                page_number = futures[future]
+                segments_by_page[page_number] = future.result()
+                completed += 1
+                update_job(db, job, progress=int(completed / total_steps * 100))
 
         output_path = base_dir / "final.mp4"
+        segments = [segments_by_page[page.page_number] for page in pages]
         video.concat_segments(segments, output_path)
         video.write_srt(captions, output_path.with_suffix(".srt"))
         project.output_video_path = str(output_path)

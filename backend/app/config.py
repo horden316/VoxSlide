@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     video_width: int = Field(default=1920)
     video_height: int = Field(default=1080)
     video_encoder: str = "h264_nvenc"
+    video_segment_workers: int = Field(default=4, ge=1)
 
 
 @lru_cache
