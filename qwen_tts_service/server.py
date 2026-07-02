@@ -19,19 +19,19 @@ DEVICE = os.getenv("QWEN_TTS_DEVICE", "cpu")
 ATTN_IMPLEMENTATION = os.getenv("QWEN_TTS_ATTN_IMPLEMENTATION", "eager")
 DEFAULT_INSTRUCT = os.getenv("QWEN_TTS_INSTRUCT", "Speak in a neutral, consistent, clear voice.")
 SEED = int(os.getenv("QWEN_TTS_SEED", "316"))
-DO_SAMPLE = os.getenv("QWEN_TTS_DO_SAMPLE", "false").lower() == "true"
+DO_SAMPLE = os.getenv("QWEN_TTS_DO_SAMPLE", "true").lower() == "true"
 TOP_K = int(os.getenv("QWEN_TTS_TOP_K", "50"))
 TOP_P = float(os.getenv("QWEN_TTS_TOP_P", "1.0"))
 TEMPERATURE = float(os.getenv("QWEN_TTS_TEMPERATURE", "0.7"))
 REPETITION_PENALTY = float(os.getenv("QWEN_TTS_REPETITION_PENALTY", "1.05"))
-SUBTALKER_DOSAMPLE = os.getenv("QWEN_TTS_SUBTALKER_DOSAMPLE", "false").lower() == "true"
+SUBTALKER_DOSAMPLE = os.getenv("QWEN_TTS_SUBTALKER_DOSAMPLE", "true").lower() == "true"
 SUBTALKER_TOP_K = int(os.getenv("QWEN_TTS_SUBTALKER_TOP_K", "50"))
 SUBTALKER_TOP_P = float(os.getenv("QWEN_TTS_SUBTALKER_TOP_P", "1.0"))
 SUBTALKER_TEMPERATURE = float(os.getenv("QWEN_TTS_SUBTALKER_TEMPERATURE", "0.7"))
 MAX_CHARS_PER_CHUNK = int(os.getenv("QWEN_TTS_MAX_CHARS_PER_CHUNK", "120"))
 CHUNK_SILENCE_MS = int(os.getenv("QWEN_TTS_CHUNK_SILENCE_MS", "300"))
 MAX_BATCH_CHUNKS = int(os.getenv("QWEN_TTS_MAX_BATCH_CHUNKS", "3"))
-MAX_NEW_TOKENS = int(os.getenv("QWEN_TTS_MAX_NEW_TOKENS", "128"))
+MAX_NEW_TOKENS = int(os.getenv("QWEN_TTS_MAX_NEW_TOKENS", "512"))
 
 logger = logging.getLogger("qwen_tts_service")
 logging.basicConfig(level=logging.INFO)
