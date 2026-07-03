@@ -168,7 +168,6 @@ def run_render_video_job(
         base_dir = project_dir(project.id)
         audio_dir = base_dir / "audio"
         segment_dir = base_dir / "segments"
-        captions: list[tuple[str, float]] = []
         render_inputs: list[tuple[int, Path, Path, Path]] = []
         total_steps = len(pages) * 2 + 1
         completed = 0
@@ -184,7 +183,6 @@ def run_render_video_job(
                 tts.synthesize(page.transcript, audio_path, voice, language, instruct)
                 page.audio_path = str(audio_path)
                 page.audio_duration = video.probe_duration(audio_path)
-            captions.append((page.transcript, page.audio_duration))
             completed += 1
             update_job(db, job, progress=int(completed / total_steps * 100))
 
@@ -215,6 +213,16 @@ def run_render_video_job(
         output_path = base_dir / "final.mp4"
         segments = [segments_by_page[page.page_number] for page in pages]
         video.concat_segments(segments, output_path)
+        # Caption slots follow the rendered segment durations so cue timing
+        # stays aligned with the concatenated video instead of drifting.
+        captions = [
+            (
+                page.transcript,
+                page.audio_duration,
+                video.probe_duration(segments_by_page[page.page_number]),
+            )
+            for page in pages
+        ]
         video.write_srt(captions, output_path.with_suffix(".srt"))
         project.output_video_path = str(output_path)
         project.status = "completed"

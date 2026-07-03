@@ -88,22 +88,28 @@ class VideoService:
         )
         return output_path
 
-    def write_srt(self, captions: list[tuple[str, float]], output_path: Path) -> Path:
+    def write_srt(self, captions: list[tuple[str, float, float]], output_path: Path) -> Path:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         position = 0.0
         entries: list[str] = []
         cue_index = 1
-        for text, duration in captions:
+        for text, audio_duration, slot_duration in captions:
+            audio_duration = max(audio_duration, 0.0)
+            # The rendered segment can differ slightly from its audio (frame
+            # rounding, encoder padding); advancing by the real slot keeps
+            # later pages aligned with the concatenated video.
+            slot_duration = slot_duration if slot_duration > 0 else audio_duration
+            caption_span = min(audio_duration, slot_duration)
             chunks = self._split_caption_text(text)
             if not chunks:
-                position += max(duration, 0.0)
+                position += slot_duration
                 continue
-            chunk_weights = [max(len(chunk), 1) for chunk in chunks]
+            chunk_weights = [self._caption_weight(chunk) for chunk in chunks]
             total_weight = sum(chunk_weights)
             cue_start = position
-            caption_end = position + max(duration, 0.0)
+            caption_end = position + caption_span
             for chunk_position, (chunk, weight) in enumerate(zip(chunks, chunk_weights), start=1):
-                cue_duration = max(duration, 0.0) * weight / total_weight
+                cue_duration = caption_span * weight / total_weight
                 cue_end = cue_start + cue_duration
                 if chunk_position == len(chunks):
                     cue_end = caption_end
@@ -118,7 +124,7 @@ class VideoService:
                 )
                 cue_index += 1
                 cue_start = cue_end
-            position = caption_end
+            position += slot_duration
         output_path.write_text("\n\n".join(entries) + "\n", encoding="utf-8")
         return output_path
 
@@ -126,11 +132,45 @@ class VideoService:
         normalized = re.sub(r"\s+", " ", text.strip())
         if not normalized:
             return []
-        sentences = [sentence.strip() for sentence in re.split(r"(?<=[。！？!?；;])\s*", normalized) if sentence.strip()]
+        sentences = [
+            sentence.strip()
+            for sentence in re.split(r"(?<=[。！？；])\s*|(?<=[.!?;])\s+|(?<=[.!?][\"'”’])\s+", normalized)
+            if sentence.strip()
+        ]
         chunks: list[str] = []
+        current = ""
         for sentence in sentences:
-            chunks.extend(self._wrap_caption_sentence(sentence, max_chars))
+            if len(sentence) > max_chars:
+                if current:
+                    chunks.append(current)
+                    current = ""
+                chunks.extend(self._wrap_caption_sentence(sentence, max_chars))
+                continue
+            candidate = self._join_caption_parts(current, sentence)
+            if current and len(candidate) > max_chars:
+                chunks.append(current)
+                current = sentence
+            else:
+                current = candidate
+        if current:
+            chunks.append(current)
         return chunks
+
+    def _join_caption_parts(self, left: str, right: str) -> str:
+        if not left:
+            return right
+        cjk = re.compile(r"[　-〿぀-ヿ㐀-䶿一-鿿가-힯＀-￯]")
+        if cjk.match(left[-1]) and cjk.match(right[0]):
+            return f"{left}{right}"
+        return f"{left} {right}"
+
+    def _caption_weight(self, chunk: str) -> float:
+        cjk_chars = len(re.findall(r"[぀-ヿ㐀-䶿一-鿿가-힯]", chunk))
+        latin_words = re.findall(r"[A-Za-z0-9']+", chunk)
+        latin_weight = sum(max(1.0, len(word) / 3) for word in latin_words)
+        sentence_pauses = len(re.findall(r"[。！？!?；;.]", chunk))
+        clause_pauses = len(re.findall(r"[,，、:：]", chunk))
+        return max(cjk_chars + latin_weight + sentence_pauses * 1.6 + clause_pauses * 0.8, 1.0)
 
     def _wrap_caption_sentence(self, sentence: str, max_chars: int) -> list[str]:
         if len(sentence) <= max_chars:
