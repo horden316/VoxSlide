@@ -5,6 +5,7 @@ from urllib import request
 from urllib.error import URLError
 from openai import OpenAI
 from ..config import get_settings
+from .pause_markers import strip_pause_markers
 
 
 class TtsService:
@@ -57,7 +58,8 @@ class TtsService:
         speech_args = {
             "model": settings.openai_tts_model,
             "voice": voice,
-            "input": text,
+            # OpenAI TTS has no pause-marker support, so drop them instead of reading them aloud.
+            "input": strip_pause_markers(text),
             "response_format": "mp3",
         }
         if instruct:

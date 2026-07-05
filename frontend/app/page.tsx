@@ -1,7 +1,7 @@
 "use client";
 
-import {useEffect, useMemo, useState} from "react";
-import {Download, FileText, FileUp, Play, Plus, RefreshCw, Save, Upload} from "lucide-react";
+import {useEffect, useMemo, useRef, useState} from "react";
+import {Download, FileText, FileUp, Pause, Play, Plus, RefreshCw, Save, Upload} from "lucide-react";
 import {API_BASE_URL, api} from "@/lib/api";
 import type {Job, Project, SlidePage, TtsConfig, TtsOptions} from "@/lib/api";
 
@@ -95,6 +95,7 @@ export default function Home() {
   const [selectedSpeedPreset, setSelectedSpeedPreset] = useState(speedPresets[1].id);
   const [voiceInstruct, setVoiceInstruct] = useState(() => buildInstruct(tonePresets[0].id, speedPresets[1].id));
   const [audioJob, setAudioJob] = useState<AudioJobState | null>(null);
+  const transcriptRefs = useRef<Record<number, HTMLTextAreaElement | null>>({});
 
   const downloadUrl = useMemo(
     () => (selectedProject ? `${API_BASE_URL}/api/projects/${selectedProject.id}/download` : "#"),
@@ -105,6 +106,21 @@ export default function Home() {
     [selectedProject],
   );
   const hasCompletedVideo = selectedProject?.status === "completed" || jobStatus === "completed";
+
+  function insertPauseMarker(page: SlidePage) {
+    const marker = "[pause]";
+    const textarea = transcriptRefs.current[page.id];
+    const start = textarea?.selectionStart ?? page.transcript.length;
+    const end = textarea?.selectionEnd ?? start;
+    const transcript = `${page.transcript.slice(0, start)}${marker}${page.transcript.slice(end)}`;
+    setPages((current) => current.map((item) => (item.id === page.id ? {...item, transcript} : item)));
+    requestAnimationFrame(() => {
+      if (!textarea) return;
+      textarea.focus();
+      const cursor = start + marker.length;
+      textarea.setSelectionRange(cursor, cursor);
+    });
+  }
 
   function audioSource(page: SlidePage) {
     if (!page.audio_url) return "";
@@ -503,6 +519,14 @@ export default function Home() {
                     <div className="mb-2 flex items-center justify-between">
                       <h2 className="font-semibold">Page {page.page_number}</h2>
                       <div className="flex gap-2">
+                        <button
+                          className="inline-flex items-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-sm"
+                          onClick={() => insertPauseMarker(page)}
+                          title="Insert a [pause] marker at the cursor. Edit it to [pause:1500] for a custom length in milliseconds."
+                        >
+                          <Pause size={16} />
+                          <span>Pause</span>
+                        </button>
                         <button className="inline-flex items-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-sm" onClick={() => saveTranscript(page)}>
                           <Save size={16} />
                           <span>Save</span>
@@ -518,6 +542,9 @@ export default function Home() {
                       </div>
                     </div>
                     <textarea
+                      ref={(element) => {
+                        transcriptRefs.current[page.id] = element;
+                      }}
                       className="min-h-32 w-full resize-y rounded-md border border-slate-300 p-3 text-sm outline-none focus:border-slate-700"
                       value={page.transcript}
                       onChange={(event) =>
