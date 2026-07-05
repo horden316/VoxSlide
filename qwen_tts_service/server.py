@@ -66,6 +66,20 @@ app = FastAPI(title="Qwen TTS Service")
 model: Any | None = None
 generation_lock = Lock()
 
+PROGRESS_TTL_SECONDS = 600
+progress_lock = Lock()
+progress_state: dict[str, dict[str, Any]] = {}
+
+
+def set_progress(request_id: str | None, completed: int, total: int, status: str) -> None:
+    if not request_id:
+        return
+    now = time.time()
+    with progress_lock:
+        progress_state[request_id] = {"completed": completed, "total": total, "status": status, "updated_at": now}
+        for stale_id in [key for key, state in progress_state.items() if now - state["updated_at"] > PROGRESS_TTL_SECONDS]:
+            del progress_state[stale_id]
+
 
 class TtsRequest(BaseModel):
     text: str | None = None
@@ -76,6 +90,7 @@ class TtsRequest(BaseModel):
     language: str | None = None
     instruct: str | None = None
     response_format: str | None = "mp3"
+    request_id: str | None = None
 
 
 @dataclass
@@ -267,6 +282,15 @@ def health() -> dict[str, str]:
     return {"status": "ok", "model": MODEL_ID}
 
 
+@app.get("/progress/{request_id}")
+def get_progress(request_id: str) -> dict[str, Any]:
+    with progress_lock:
+        state = progress_state.get(request_id)
+    if not state:
+        return {"completed": 0, "total": 0, "status": "unknown"}
+    return {"completed": state["completed"], "total": state["total"], "status": state["status"]}
+
+
 @app.post("/tts")
 def tts(payload: TtsRequest) -> Response:
     text = (payload.text or payload.input or "").strip()
@@ -282,6 +306,7 @@ def tts(payload: TtsRequest) -> Response:
     if not script_chunks:
         raise HTTPException(status_code=400, detail="text contains no speakable content")
 
+    set_progress(payload.request_id, 0, len(script_chunks), "queued")
     try:
         spoken_text = PAUSE_MARKER.sub(" ", text)
         language = payload.language or infer_language(spoken_text, speaker_config["language"])
@@ -303,6 +328,7 @@ def tts(payload: TtsRequest) -> Response:
             audio_chunks = []
             sr = None
             completed_chunks = 0
+            set_progress(payload.request_id, 0, len(script_chunks), "running")
             for batch_index, batch in enumerate(chunked(chunk_texts, MAX_BATCH_CHUNKS), start=1):
                 batch_started_at = time.perf_counter()
                 wavs, chunk_sr = qwen_model.generate_custom_voice(
@@ -324,6 +350,7 @@ def tts(payload: TtsRequest) -> Response:
                 sr = chunk_sr
                 audio_chunks.extend(wavs)
                 completed_chunks += len(batch)
+                set_progress(payload.request_id, completed_chunks, len(script_chunks), "running")
                 logger.info(
                     "Generated TTS chunk batch %s speaker=%s chunks=%s/%s chars=%s elapsed=%.2fs",
                     batch_index,
@@ -350,8 +377,10 @@ def tts(payload: TtsRequest) -> Response:
                 time.perf_counter() - started_at,
             )
     except Exception as exc:
+        set_progress(payload.request_id, 0, len(script_chunks), "failed")
         raise HTTPException(status_code=500, detail=f"Qwen TTS generation failed: {exc}") from exc
 
+    set_progress(payload.request_id, len(script_chunks), len(script_chunks), "completed")
     output = BytesIO()
     sf.write(output, wav, sr or 24000, format="MP3")
     return Response(content=output.getvalue(), media_type="audio/mpeg")

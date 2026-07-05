@@ -1,7 +1,7 @@
 "use client";
 
 import {useEffect, useMemo, useRef, useState} from "react";
-import {Download, FileText, FileUp, Pause, Play, Plus, RefreshCw, Save, Upload} from "lucide-react";
+import {Download, FileText, FileUp, Play, Plus, RefreshCw, Save, Upload} from "lucide-react";
 import {API_BASE_URL, api} from "@/lib/api";
 import type {Job, Project, SlidePage, TtsConfig, TtsOptions} from "@/lib/api";
 
@@ -519,14 +519,6 @@ export default function Home() {
                     <div className="mb-2 flex items-center justify-between">
                       <h2 className="font-semibold">Page {page.page_number}</h2>
                       <div className="flex gap-2">
-                        <button
-                          className="inline-flex items-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-sm"
-                          onClick={() => insertPauseMarker(page)}
-                          title="Insert a [pause] marker at the cursor. Edit it to [pause:1500] for a custom length in milliseconds."
-                        >
-                          <Pause size={16} />
-                          <span>Pause</span>
-                        </button>
                         <button className="inline-flex items-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-sm" onClick={() => saveTranscript(page)}>
                           <Save size={16} />
                           <span>Save</span>
@@ -540,6 +532,16 @@ export default function Home() {
                           <span>{audioJob?.pageId === page.id ? "Generating" : "Audio"}</span>
                         </button>
                       </div>
+                    </div>
+                    <div className="mb-1 flex justify-end">
+                      <button
+                        className="inline-flex items-center gap-1 rounded border border-dashed border-slate-300 px-2 py-1 font-mono text-xs text-slate-500 hover:border-slate-500 hover:text-slate-900"
+                        onClick={() => insertPauseMarker(page)}
+                        title="Insert a pause marker at the cursor. Edit it to [pause:1500] for a custom length in milliseconds."
+                      >
+                        <Plus size={12} />
+                        <span>[pause]</span>
+                      </button>
                     </div>
                     <textarea
                       ref={(element) => {

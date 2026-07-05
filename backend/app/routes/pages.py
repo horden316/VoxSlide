@@ -147,7 +147,19 @@ def run_generate_audio_job(
 
         audio_path = project_dir(page.project_id) / "audio" / f"page-{page.page_number:04d}.mp3"
         update_audio_job(db, job, progress=20)
-        TtsService().synthesize(page.transcript, audio_path, voice, language, instruct)
+
+        def report_tts_progress(completed_chunks: int, total_chunks: int) -> None:
+            # Runs on the TTS polling thread, so it needs its own session.
+            session = SessionLocal()
+            try:
+                tracked = session.get(Job, job_id)
+                if tracked and tracked.status == "running":
+                    tracked.progress = 20 + int(completed_chunks / max(total_chunks, 1) * 65)
+                    session.commit()
+            finally:
+                session.close()
+
+        TtsService().synthesize(page.transcript, audio_path, voice, language, instruct, progress_callback=report_tts_progress)
         update_audio_job(db, job, progress=85)
         page.audio_path = str(audio_path)
         page.audio_duration = VideoService().probe_duration(audio_path)

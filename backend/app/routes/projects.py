@@ -145,6 +145,22 @@ def update_job(db: Session, job: Job, status: str | None = None, progress: int |
     db.refresh(job)
 
 
+def make_tts_progress_reporter(job_id: int, completed_steps: int, total_steps: int):
+    def report(completed_chunks: int, total_chunks: int) -> None:
+        # Runs on the TTS polling thread, so it needs its own session.
+        session = SessionLocal()
+        try:
+            tracked = session.get(Job, job_id)
+            if tracked and tracked.status == "running":
+                page_fraction = completed_chunks / max(total_chunks, 1)
+                tracked.progress = max(0, min(100, int((completed_steps + page_fraction) / total_steps * 100)))
+                session.commit()
+        finally:
+            session.close()
+
+    return report
+
+
 def run_render_video_job(
     job_id: int,
     voice: str | None = None,
@@ -180,7 +196,14 @@ def run_render_video_job(
                 if page.audio_duration is None:
                     page.audio_duration = video.probe_duration(audio_path)
             else:
-                tts.synthesize(page.transcript, audio_path, voice, language, instruct)
+                tts.synthesize(
+                    page.transcript,
+                    audio_path,
+                    voice,
+                    language,
+                    instruct,
+                    progress_callback=make_tts_progress_reporter(job_id, completed, total_steps),
+                )
                 page.audio_path = str(audio_path)
                 page.audio_duration = video.probe_duration(audio_path)
             completed += 1

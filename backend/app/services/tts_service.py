@@ -1,11 +1,16 @@
 from pathlib import Path
+from typing import Callable
 import base64
 import json
+import threading
+import uuid
 from urllib import request
 from urllib.error import URLError
 from openai import OpenAI
 from ..config import get_settings
 from .pause_markers import strip_pause_markers
+
+ProgressCallback = Callable[[int, int], None]
 
 
 class TtsService:
@@ -42,12 +47,13 @@ class TtsService:
         voice: str | None = None,
         language: str | None = None,
         instruct: str | None = None,
+        progress_callback: ProgressCallback | None = None,
     ) -> Path:
         settings = get_settings()
         output_path.parent.mkdir(parents=True, exist_ok=True)
         selected_voice = voice or self.default_voice
         if settings.tts_provider == "qwen_local":
-            return self._synthesize_qwen_local(text, output_path, selected_voice, language, instruct)
+            return self._synthesize_qwen_local(text, output_path, selected_voice, language, instruct, progress_callback)
         return self._synthesize_openai(text, output_path, selected_voice, instruct)
 
     def _synthesize_openai(self, text: str, output_path: Path, voice: str, instruct: str | None = None) -> Path:
@@ -77,16 +83,19 @@ class TtsService:
         voice: str,
         language: str | None = None,
         instruct: str | None = None,
+        progress_callback: ProgressCallback | None = None,
     ) -> Path:
         settings = get_settings()
         if not settings.qwen_tts_endpoint:
             raise RuntimeError("QWEN_TTS_ENDPOINT is not configured")
+        request_id = uuid.uuid4().hex
         request_payload = {
             "text": text,
             "input": text,
             "model": settings.qwen_tts_model,
             "voice": voice,
             "response_format": "mp3",
+            "request_id": request_id,
         }
         if language:
             request_payload["language"] = language
@@ -99,18 +108,48 @@ class TtsService:
             headers={"Content-Type": "application/json", "Accept": "audio/mpeg,application/json"},
             method="POST",
         )
+        stop_polling = threading.Event()
+        poller: threading.Thread | None = None
+        if progress_callback:
+            progress_url = settings.qwen_tts_endpoint.rsplit("/", 1)[0] + f"/progress/{request_id}"
+            poller = threading.Thread(
+                target=self._poll_progress,
+                args=(progress_url, progress_callback, stop_polling),
+                daemon=True,
+            )
+            poller.start()
         try:
             with request.urlopen(req, timeout=300) as response:
                 content_type = response.headers.get("Content-Type", "")
                 body = response.read()
         except URLError as exc:
             raise RuntimeError(f"Qwen TTS endpoint is unavailable: {exc}") from exc
+        finally:
+            stop_polling.set()
+            if poller:
+                poller.join(timeout=3)
 
         if "application/json" in content_type:
             self._write_audio_from_json(body, output_path)
         else:
             output_path.write_bytes(body)
         return output_path
+
+    def _poll_progress(self, progress_url: str, callback: ProgressCallback, stop_polling: threading.Event) -> None:
+        while not stop_polling.wait(1.0):
+            try:
+                with request.urlopen(progress_url, timeout=5) as response:
+                    state = json.loads(response.read().decode("utf-8"))
+            except (URLError, json.JSONDecodeError, ValueError):
+                continue
+            total = int(state.get("total") or 0)
+            if state.get("status") != "running" or total <= 0:
+                continue
+            try:
+                callback(int(state.get("completed") or 0), total)
+            except Exception:
+                # Progress reporting must never break synthesis.
+                continue
 
     def _write_audio_from_json(self, body: bytes, output_path: Path) -> None:
         try:
