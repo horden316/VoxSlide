@@ -61,6 +61,8 @@ SPEAKERS = {
 }
 
 PAUSE_MARKER = re.compile(r"\[pause(?::\s*(\d+)\s*(?:ms)?)?\]", re.IGNORECASE)
+# Double quotes are silent but make the model emit EOS early, truncating the chunk.
+QUOTE_CHARS = re.compile(r"[\"“”„‟«»「」『』＂]")
 SENTENCE_SPLIT = re.compile(r"(?<=[。！？!?；;.])\s*")
 CJK_CHAR = re.compile(r"[　-ヿ㐀-䶿一-鿿가-힯＀-￯]")
 
@@ -183,7 +185,7 @@ def boundary_gap_ms(sentence: str) -> int:
 
 def parse_segment(segment: str) -> list[ScriptChunk]:
     """Split marker-free text into sentence chunks with punctuation-based gaps."""
-    normalized = re.sub(r"\s+", " ", segment).strip()
+    normalized = re.sub(r"\s+", " ", QUOTE_CHARS.sub("", segment)).strip()
     if not normalized:
         return []
     sentences = [part.strip() for part in SENTENCE_SPLIT.split(normalized) if part.strip()]
