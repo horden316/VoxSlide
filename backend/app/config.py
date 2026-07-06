@@ -20,6 +20,9 @@ class Settings(BaseSettings):
     video_height: int = Field(default=1080)
     video_encoder: str = "h264_nvenc"
     video_segment_workers: int = Field(default=4, ge=1)
+    # Slightly above QWEN_TTS_WORKERS so uvicorn's random request routing
+    # keeps every TTS worker busy; extra requests just queue there.
+    tts_workers: int = Field(default=3, ge=1)
 
 
 @lru_cache

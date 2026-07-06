@@ -20,4 +20,5 @@ RUN apt-get update \
 COPY server.py .
 EXPOSE 7860
 
-CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "7860"]
+# Each worker process lazy-loads its own model copy (~14GB VRAM apiece).
+CMD ["sh", "-c", "uvicorn server:app --host 0.0.0.0 --port 7860 --workers ${QWEN_TTS_WORKERS:-2}"]

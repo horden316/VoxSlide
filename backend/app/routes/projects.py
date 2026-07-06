@@ -1,6 +1,7 @@
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import shutil
+from threading import Lock
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
@@ -145,20 +146,34 @@ def update_job(db: Session, job: Job, status: str | None = None, progress: int |
     db.refresh(job)
 
 
-def make_tts_progress_reporter(job_id: int, completed_steps: int, total_steps: int):
-    def report(completed_chunks: int, total_chunks: int) -> None:
-        # Runs on the TTS polling thread, so it needs its own session.
+class TtsProgressAggregator:
+    """Combines per-chunk progress from concurrently synthesized pages into one job progress value."""
+
+    def __init__(self, job_id: int, total_steps: int):
+        self.job_id = job_id
+        self.total_steps = total_steps
+        self.lock = Lock()
+        self.fractions: dict[int, float] = {}
+
+    def reporter(self, page_number: int):
+        def report(completed_chunks: int, total_chunks: int) -> None:
+            self.set_fraction(page_number, completed_chunks / max(total_chunks, 1))
+
+        return report
+
+    def set_fraction(self, page_number: int, fraction: float) -> None:
+        with self.lock:
+            self.fractions[page_number] = min(max(fraction, self.fractions.get(page_number, 0.0)), 1.0)
+            overall = sum(self.fractions.values())
+        # Runs on TTS polling threads, so it needs its own session.
         session = SessionLocal()
         try:
-            tracked = session.get(Job, job_id)
+            tracked = session.get(Job, self.job_id)
             if tracked and tracked.status == "running":
-                page_fraction = completed_chunks / max(total_chunks, 1)
-                tracked.progress = max(0, min(100, int((completed_steps + page_fraction) / total_steps * 100)))
+                tracked.progress = max(tracked.progress or 0, min(100, int(overall / self.total_steps * 100)))
                 session.commit()
         finally:
             session.close()
-
-    return report
 
 
 def run_render_video_job(
@@ -184,43 +199,57 @@ def run_render_video_job(
         base_dir = project_dir(project.id)
         audio_dir = base_dir / "audio"
         segment_dir = base_dir / "segments"
-        render_inputs: list[tuple[int, Path, Path, Path]] = []
         total_steps = len(pages) * 2 + 1
         completed = 0
+        settings = get_settings()
+        tts_progress = TtsProgressAggregator(job_id, total_steps)
 
+        pages_to_synthesize: list[tuple[Page, Path]] = []
         for page in pages:
-            audio_path = audio_dir / f"page-{page.page_number:04d}.mp3"
             existing_audio_path = safe_storage_path(page.audio_path) if page.audio_path else None
             if existing_audio_path and existing_audio_path.exists():
-                audio_path = existing_audio_path
                 if page.audio_duration is None:
-                    page.audio_duration = video.probe_duration(audio_path)
+                    page.audio_duration = video.probe_duration(existing_audio_path)
+                tts_progress.set_fraction(page.page_number, 1.0)
+                completed += 1
             else:
-                tts.synthesize(
-                    page.transcript,
-                    audio_path,
-                    voice,
-                    language,
-                    instruct,
-                    progress_callback=make_tts_progress_reporter(job_id, completed, total_steps),
-                )
-                page.audio_path = str(audio_path)
-                page.audio_duration = video.probe_duration(audio_path)
-            completed += 1
-            update_job(db, job, progress=int(completed / total_steps * 100))
+                pages_to_synthesize.append((page, audio_dir / f"page-{page.page_number:04d}.mp3"))
 
-            segment_path = segment_dir / f"page-{page.page_number:04d}.mp4"
-            render_inputs.append(
-                (
-                    page.page_number,
-                    safe_storage_path(page.image_path),
-                    safe_storage_path(page.audio_path),
-                    segment_path,
-                )
+        if pages_to_synthesize:
+            tts_workers = min(settings.tts_workers, len(pages_to_synthesize))
+            with ThreadPoolExecutor(max_workers=tts_workers) as executor:
+                futures = {
+                    executor.submit(
+                        tts.synthesize,
+                        page.transcript,
+                        audio_path,
+                        voice,
+                        language,
+                        instruct,
+                        progress_callback=tts_progress.reporter(page.page_number),
+                    ): (page, audio_path)
+                    for page, audio_path in pages_to_synthesize
+                }
+                for future in as_completed(futures):
+                    page, audio_path = futures[future]
+                    future.result()
+                    page.audio_path = str(audio_path)
+                    page.audio_duration = video.probe_duration(audio_path)
+                    tts_progress.set_fraction(page.page_number, 1.0)
+                    completed += 1
+            db.commit()
+
+        render_inputs = [
+            (
+                page.page_number,
+                safe_storage_path(page.image_path),
+                safe_storage_path(page.audio_path),
+                segment_dir / f"page-{page.page_number:04d}.mp4",
             )
+            for page in pages
+        ]
 
         segments_by_page: dict[int, Path] = {}
-        settings = get_settings()
         max_workers = min(settings.video_segment_workers, len(render_inputs))
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = {

@@ -22,8 +22,9 @@ services:
       - QWEN_TTS_TRIM_THRESHOLD_DB=${QWEN_TTS_TRIM_THRESHOLD_DB:--42}
       - QWEN_TTS_TRIM_PAD_MS=${QWEN_TTS_TRIM_PAD_MS:-15}
       - QWEN_TTS_EDGE_FADE_MS=${QWEN_TTS_EDGE_FADE_MS:-10}
-      - QWEN_TTS_MAX_BATCH_CHUNKS=${QWEN_TTS_MAX_BATCH_CHUNKS:-3}
+      - QWEN_TTS_MAX_BATCH_CHUNKS=${QWEN_TTS_MAX_BATCH_CHUNKS:-32}
       - QWEN_TTS_MAX_NEW_TOKENS=${QWEN_TTS_MAX_NEW_TOKENS:-512}
+      - QWEN_TTS_WORKERS=${QWEN_TTS_WORKERS:-2}
     volumes:
       - ./storage/models:/models
     gpus: all
@@ -49,6 +50,7 @@ services:
       - OPENAI_TTS_VOICE=${OPENAI_TTS_VOICE:-alloy}
       - VIDEO_ENCODER=${VIDEO_ENCODER:-h264_nvenc}
       - VIDEO_SEGMENT_WORKERS=${VIDEO_SEGMENT_WORKERS:-4}
+      - TTS_WORKERS=${TTS_WORKERS:-3}
     volumes:
       - ./storage:/app/storage
     gpus: all

@@ -1,7 +1,9 @@
 from dataclasses import dataclass
 from io import BytesIO
+import json
 import logging
 import os
+from pathlib import Path
 import random
 import re
 from threading import Lock
@@ -67,18 +69,35 @@ model: Any | None = None
 generation_lock = Lock()
 
 PROGRESS_TTL_SECONDS = 600
-progress_lock = Lock()
-progress_state: dict[str, dict[str, Any]] = {}
+# Progress lives on disk so every uvicorn worker process can answer /progress
+# for requests handled by a sibling worker.
+PROGRESS_DIR = Path(os.getenv("QWEN_TTS_PROGRESS_DIR", "/tmp/qwen_tts_progress"))
+REQUEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
+
+
+def progress_path(request_id: str) -> Path | None:
+    if not REQUEST_ID_PATTERN.match(request_id):
+        return None
+    return PROGRESS_DIR / f"{request_id}.json"
 
 
 def set_progress(request_id: str | None, completed: int, total: int, status: str) -> None:
     if not request_id:
         return
+    path = progress_path(request_id)
+    if path is None:
+        return
     now = time.time()
-    with progress_lock:
-        progress_state[request_id] = {"completed": completed, "total": total, "status": status, "updated_at": now}
-        for stale_id in [key for key, state in progress_state.items() if now - state["updated_at"] > PROGRESS_TTL_SECONDS]:
-            del progress_state[stale_id]
+    PROGRESS_DIR.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_suffix(".tmp")
+    tmp_path.write_text(json.dumps({"completed": completed, "total": total, "status": status}))
+    tmp_path.replace(path)
+    for stale in PROGRESS_DIR.glob("*.json"):
+        try:
+            if now - stale.stat().st_mtime > PROGRESS_TTL_SECONDS:
+                stale.unlink(missing_ok=True)
+        except OSError:
+            continue
 
 
 class TtsRequest(BaseModel):
@@ -284,11 +303,14 @@ def health() -> dict[str, str]:
 
 @app.get("/progress/{request_id}")
 def get_progress(request_id: str) -> dict[str, Any]:
-    with progress_lock:
-        state = progress_state.get(request_id)
-    if not state:
-        return {"completed": 0, "total": 0, "status": "unknown"}
-    return {"completed": state["completed"], "total": state["total"], "status": state["status"]}
+    path = progress_path(request_id)
+    if path is not None and path.exists():
+        try:
+            state = json.loads(path.read_text())
+            return {"completed": state["completed"], "total": state["total"], "status": state["status"]}
+        except (OSError, json.JSONDecodeError, KeyError):
+            pass
+    return {"completed": 0, "total": 0, "status": "unknown"}
 
 
 @app.post("/tts")
