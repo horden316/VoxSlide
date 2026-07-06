@@ -15,10 +15,14 @@ type AudioJobState = {
 
 const tonePresets = [
   {
+    id: "default",
+    label: "Speaker default (most stable)",
+    instruct: "",
+  },
+  {
     id: "professional",
     label: "Professional presentation",
-    instruct:
-      "Speak in a natural, clear, and confident business presentation style. Keep the tone professional, composed, and easy to follow without sounding theatrical.",
+    instruct: "Speak in a clear, calm, professional presentation tone, consistent from start to finish.",
   },
   {
     id: "teaching",
@@ -35,8 +39,7 @@ const tonePresets = [
   {
     id: "formal",
     label: "Formal and steady",
-    instruct:
-      "Speak in a steady, formal, and trustworthy style. Keep the delivery measured, composed, and free from excessive emotion.",
+    instruct: "Speak in a calm, steady, formal tone, consistent throughout.",
   },
   {
     id: "energetic",
@@ -54,8 +57,8 @@ const speedPresets = [
   },
   {
     id: "medium",
-    label: "Medium",
-    instruct: "Use a moderate speaking pace with natural pauses.",
+    label: "Medium (no prompt)",
+    instruct: "",
   },
   {
     id: "fast",
@@ -75,7 +78,7 @@ const languageOptions = [
 function buildInstruct(toneId: string, speedId: string) {
   const tone = tonePresets.find((preset) => preset.id === toneId) || tonePresets[0];
   const speed = speedPresets.find((preset) => preset.id === speedId) || speedPresets[1];
-  return `${tone.instruct} ${speed.instruct}`;
+  return [tone.instruct, speed.instruct].filter(Boolean).join(" ");
 }
 
 export default function Home() {
@@ -465,7 +468,7 @@ export default function Home() {
                   className="mt-1 min-h-24 w-full resize-y rounded-md border border-slate-300 p-3 text-sm text-slate-900 outline-none focus:border-slate-700"
                   value={voiceInstruct}
                   onChange={(event) => setVoiceInstruct(event.target.value)}
-                  placeholder="Describe the delivery style, tone, pacing, and speaking context."
+                  placeholder="Empty = speaker's built-in default (most stable). Keep custom instructions short and positive."
                 />
               </label>
             </div>
