@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Any
 from pydantic import BaseModel
 
 
@@ -26,12 +27,14 @@ class GenerateAudioRequest(BaseModel):
     voice: str | None = None
     language: str | None = None
     instruct: str | None = None
+    tts_params: dict[str, Any] | None = None
 
 
 class RenderVideoRequest(BaseModel):
     voice: str | None = None
     language: str | None = None
     instruct: str | None = None
+    tts_params: dict[str, Any] | None = None
     force_regenerate: bool = False
 
 
@@ -74,3 +77,5 @@ class TtsConfigOut(BaseModel):
     model: str
     default_voice: str
     voices: list[TtsVoiceOut]
+    params: dict[str, Any] | None = None
+    speaker_instructs: dict[str, str] | None = None

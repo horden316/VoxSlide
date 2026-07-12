@@ -62,6 +62,8 @@ def get_tts_config() -> TtsConfigOut:
         model=service.model,
         default_voice=service.default_voice,
         voices=service.available_voices(),
+        params=service.default_params(),
+        speaker_instructs=service.speaker_instructs(),
     )
 
 
@@ -80,6 +82,7 @@ def generate_audio(page_id: int, payload: GenerateAudioRequest | None = None, db
             clean_tts_value(payload.voice) if payload else None,
             clean_tts_value(payload.language) if payload else None,
             clean_tts_value(payload.instruct) if payload else None,
+            payload.tts_params if payload else None,
         )
     except RuntimeError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -113,6 +116,7 @@ def generate_audio_job(
         clean_tts_value(payload.voice) if payload else None,
         clean_tts_value(payload.language) if payload else None,
         clean_tts_value(payload.instruct) if payload else None,
+        payload.tts_params if payload else None,
     )
     return JobCreated(job_id=job.id)
 
@@ -134,6 +138,7 @@ def run_generate_audio_job(
     voice: str | None = None,
     language: str | None = None,
     instruct: str | None = None,
+    tts_params: dict | None = None,
 ) -> None:
     db = SessionLocal()
     try:
@@ -159,7 +164,7 @@ def run_generate_audio_job(
             finally:
                 session.close()
 
-        TtsService().synthesize(page.transcript, audio_path, voice, language, instruct, progress_callback=report_tts_progress)
+        TtsService().synthesize(page.transcript, audio_path, voice, language, instruct, tts_params, progress_callback=report_tts_progress)
         update_audio_job(db, job, progress=85)
         page.audio_path = str(audio_path)
         page.audio_duration = VideoService().probe_duration(audio_path)

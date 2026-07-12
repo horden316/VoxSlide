@@ -1,9 +1,9 @@
 "use client";
 
 import {useEffect, useMemo, useRef, useState} from "react";
-import {Download, FileText, FileUp, Play, Plus, RefreshCw, Save, Upload} from "lucide-react";
+import {ChevronDown, Dices, Download, FileText, FileUp, Play, Plus, RefreshCw, RotateCcw, Save, SlidersHorizontal, Upload} from "lucide-react";
 import {API_BASE_URL, api} from "@/lib/api";
-import type {Job, Project, SlidePage, TtsConfig, TtsOptions} from "@/lib/api";
+import type {Job, Project, SlidePage, TtsConfig, TtsOptions, TtsParamValue} from "@/lib/api";
 
 type AudioJobState = {
   id: number;
@@ -11,6 +11,7 @@ type AudioJobState = {
   pageNumber: number;
   status: string;
   progress: number;
+  seed?: number;
 };
 
 const tonePresets = [
@@ -67,6 +68,89 @@ const speedPresets = [
   },
 ];
 
+type TtsParamField = {
+  key: string;
+  label: string;
+  step: number;
+};
+
+const ttsParamGroups: {title: string; fields: TtsParamField[]}[] = [
+  {
+    title: "Sampling (semantic layer)",
+    fields: [
+      {key: "temperature", label: "Temperature", step: 0.05},
+      {key: "top_p", label: "Top-p", step: 0.05},
+      {key: "top_k", label: "Top-k", step: 1},
+      {key: "repetition_penalty", label: "Repetition penalty", step: 0.01},
+      {key: "seed", label: "Seed", step: 1},
+      {key: "max_new_tokens", label: "Max new tokens", step: 32},
+    ],
+  },
+  {
+    title: "Subtalker sampling (acoustic layer)",
+    fields: [
+      {key: "subtalker_temperature", label: "Temperature", step: 0.05},
+      {key: "subtalker_top_p", label: "Top-p", step: 0.05},
+      {key: "subtalker_top_k", label: "Top-k", step: 1},
+    ],
+  },
+  {
+    title: "Chunking",
+    fields: [
+      {key: "max_chars_per_chunk", label: "Max chars / chunk", step: 10},
+      {key: "min_chunk_chars", label: "Min chunk chars", step: 1},
+    ],
+  },
+  {
+    title: "Pauses (ms)",
+    fields: [
+      {key: "sentence_gap_ms", label: "Sentence gap", step: 50},
+      {key: "semicolon_gap_ms", label: "Semicolon gap", step: 50},
+      {key: "paragraph_gap_ms", label: "Paragraph gap", step: 50},
+      {key: "wrap_gap_ms", label: "Wrap gap", step: 50},
+      {key: "pause_default_ms", label: "[pause] default", step: 100},
+    ],
+  },
+  {
+    title: "Audio trim",
+    fields: [
+      {key: "trim_threshold_db", label: "Trim threshold (dB)", step: 1},
+      {key: "trim_pad_ms", label: "Trim pad (ms)", step: 5},
+      {key: "edge_fade_ms", label: "Edge fade (ms)", step: 5},
+    ],
+  },
+];
+
+const booleanParamFields = [
+  {key: "do_sample", label: "do_sample"},
+  {key: "subtalker_dosample", label: "subtalker_dosample"},
+];
+
+// Mirrors the docker-compose defaults; only used when /api/tts/config cannot reach the TTS service.
+const fallbackTtsDefaults: Record<string, TtsParamValue> = {
+  seed: 316,
+  do_sample: true,
+  top_k: 10,
+  top_p: 0.8,
+  temperature: 0.6,
+  repetition_penalty: 1.05,
+  subtalker_dosample: true,
+  subtalker_top_k: 10,
+  subtalker_top_p: 0.8,
+  subtalker_temperature: 0.6,
+  max_new_tokens: 1024,
+  max_chars_per_chunk: 200,
+  min_chunk_chars: 80,
+  sentence_gap_ms: 700,
+  semicolon_gap_ms: 350,
+  paragraph_gap_ms: 1000,
+  wrap_gap_ms: 150,
+  pause_default_ms: 1000,
+  trim_threshold_db: -42,
+  trim_pad_ms: 15,
+  edge_fade_ms: 10,
+};
+
 const languageOptions = [
   {id: "", label: "Speaker default"},
   {id: "Chinese", label: "Chinese"},
@@ -99,6 +183,8 @@ export default function Home() {
   const [voiceInstruct, setVoiceInstruct] = useState(() => buildInstruct(tonePresets[0].id, speedPresets[1].id));
   const [audioJob, setAudioJob] = useState<AudioJobState | null>(null);
   const [forceRegenerate, setForceRegenerate] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [paramOverrides, setParamOverrides] = useState<Record<string, string>>({});
   const transcriptRefs = useRef<Record<number, HTMLTextAreaElement | null>>({});
 
   const downloadUrl = useMemo(
@@ -142,11 +228,42 @@ export default function Home() {
     }
   }
 
+  const ttsDefaults = ttsConfig?.params ?? fallbackTtsDefaults;
+  const overrideCount = Object.values(paramOverrides).filter((value) => value.trim() !== "").length;
+
+  function setParamOverride(key: string, value: string) {
+    setParamOverrides((current) => {
+      const next = {...current};
+      if (value === "") {
+        delete next[key];
+      } else {
+        next[key] = value;
+      }
+      return next;
+    });
+  }
+
+  function collectTtsParams(): Record<string, TtsParamValue> | undefined {
+    const params: Record<string, TtsParamValue> = {};
+    for (const [key, raw] of Object.entries(paramOverrides)) {
+      const text = raw.trim();
+      if (!text) continue;
+      if (typeof ttsDefaults[key] === "boolean") {
+        params[key] = text === "true";
+      } else {
+        const value = Number(text);
+        if (Number.isFinite(value)) params[key] = value;
+      }
+    }
+    return Object.keys(params).length > 0 ? params : undefined;
+  }
+
   function ttsOptions(): TtsOptions {
     return {
       voice: selectedVoice || undefined,
       language: selectedLanguage || undefined,
       instruct: voiceInstruct.trim() || undefined,
+      tts_params: collectTtsParams(),
     };
   }
 
@@ -209,7 +326,8 @@ export default function Home() {
         setAudioJob((current) => (current && current.id === job.id ? jobToAudioState(job, current) : current));
         if (job.status === "completed" || job.status === "failed") {
           window.clearInterval(timer);
-          setMessage(job.status === "completed" ? `Page ${audioJob.pageNumber} audio generated.` : job.error_message || "Audio generation failed.");
+          const seedNote = audioJob.seed !== undefined ? ` (seed ${audioJob.seed})` : "";
+          setMessage(job.status === "completed" ? `Page ${audioJob.pageNumber} audio generated${seedNote}.` : job.error_message || "Audio generation failed.");
           if (job.status === "completed") {
             await refreshPages();
           }
@@ -275,7 +393,7 @@ export default function Home() {
     }
   }
 
-  async function generateAudio(page: SlidePage) {
+  async function generateAudio(page: SlidePage, rerollSeed?: number) {
     setMessage("");
     if (!page.transcript.trim()) {
       setMessage(`Page ${page.page_number} needs a transcript before audio generation.`);
@@ -283,12 +401,24 @@ export default function Home() {
     }
     try {
       await api.saveTranscript(page.id, page.transcript);
-      const job = await api.generateAudioJob(page.id, ttsOptions());
-      setAudioJob({id: job.job_id, pageId: page.id, pageNumber: page.page_number, status: "queued", progress: 0});
-      setMessage(`Page ${page.page_number} audio generation started.`);
+      const options = ttsOptions();
+      if (rerollSeed !== undefined) {
+        options.tts_params = {...options.tts_params, seed: rerollSeed};
+      }
+      const job = await api.generateAudioJob(page.id, options);
+      setAudioJob({id: job.job_id, pageId: page.id, pageNumber: page.page_number, status: "queued", progress: 0, seed: rerollSeed});
+      setMessage(
+        rerollSeed !== undefined
+          ? `Page ${page.page_number} rerolling with seed ${rerollSeed}.`
+          : `Page ${page.page_number} audio generation started.`,
+      );
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Audio generation failed.");
     }
+  }
+
+  function rerollAudio(page: SlidePage) {
+    return generateAudio(page, Math.floor(Math.random() * 1_000_000));
   }
 
   async function renderVideo() {
@@ -481,9 +611,84 @@ export default function Home() {
                   className="mt-1 min-h-24 w-full resize-y rounded-md border border-slate-300 p-3 text-sm text-slate-900 outline-none focus:border-slate-700"
                   value={voiceInstruct}
                   onChange={(event) => setVoiceInstruct(event.target.value)}
-                  placeholder="Empty = speaker's built-in default (most stable). Keep custom instructions short and positive."
+                  placeholder={
+                    ttsConfig?.speaker_instructs?.[selectedVoice]
+                      ? `Empty = speaker default: ${ttsConfig.speaker_instructs[selectedVoice]} (most stable). Keep custom instructions short and positive.`
+                      : "Empty = speaker's built-in default (most stable). Keep custom instructions short and positive."
+                  }
                 />
               </label>
+
+              <div className="mt-3 border-t border-slate-200 pt-3">
+                <button
+                  className="inline-flex items-center gap-2 text-xs font-medium text-slate-600 hover:text-slate-900"
+                  onClick={() => setAdvancedOpen((open) => !open)}
+                >
+                  <SlidersHorizontal size={14} />
+                  <span>Advanced TTS parameters</span>
+                  {overrideCount > 0 && (
+                    <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-800">{overrideCount} modified</span>
+                  )}
+                  <ChevronDown size={14} className={`transition-transform ${advancedOpen ? "rotate-180" : ""}`} />
+                </button>
+                {advancedOpen && (
+                  <div className="mt-3">
+                    <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-xs text-slate-500">
+                        Empty fields use the server defaults shown as placeholders. Overrides apply to page audio and video rendering.
+                      </p>
+                      <button
+                        className="inline-flex items-center gap-1 rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:border-slate-500 hover:text-slate-900 disabled:opacity-50"
+                        onClick={() => setParamOverrides({})}
+                        disabled={overrideCount === 0}
+                      >
+                        <RotateCcw size={12} />
+                        <span>Reset all</span>
+                      </button>
+                    </div>
+                    <div className="mb-3 flex flex-wrap gap-4">
+                      {booleanParamFields.map((field) => (
+                        <label key={field.key} className="text-xs font-medium text-slate-600">
+                          {field.label}
+                          <select
+                            className="mt-1 block rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-900 outline-none focus:border-slate-700"
+                            value={paramOverrides[field.key] ?? ""}
+                            onChange={(event) => setParamOverride(field.key, event.target.value)}
+                          >
+                            <option value="">Default ({String(ttsDefaults[field.key])})</option>
+                            <option value="true">true</option>
+                            <option value="false">false</option>
+                          </select>
+                        </label>
+                      ))}
+                    </div>
+                    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                      {ttsParamGroups.map((group) => (
+                        <fieldset key={group.title} className="rounded-md border border-slate-200 p-3">
+                          <legend className="px-1 text-xs font-semibold text-slate-700">{group.title}</legend>
+                          <div className="grid gap-2">
+                            {group.fields.map((field) => (
+                              <label key={field.key} className="flex items-center justify-between gap-2 text-xs text-slate-600">
+                                <span>{field.label}</span>
+                                <input
+                                  type="number"
+                                  step={field.step}
+                                  className={`w-24 rounded-md border px-2 py-1 text-right text-sm text-slate-900 outline-none focus:border-slate-700 ${
+                                    paramOverrides[field.key] ? "border-amber-400 bg-amber-50" : "border-slate-300"
+                                  }`}
+                                  placeholder={String(ttsDefaults[field.key] ?? "")}
+                                  value={paramOverrides[field.key] ?? ""}
+                                  onChange={(event) => setParamOverride(field.key, event.target.value)}
+                                />
+                              </label>
+                            ))}
+                          </div>
+                        </fieldset>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
@@ -546,6 +751,15 @@ export default function Home() {
                         >
                           <Play size={16} />
                           <span>{audioJob?.pageId === page.id ? "Generating" : "Audio"}</span>
+                        </button>
+                        <button
+                          className="inline-flex items-center gap-2 rounded-md border border-emerald-700 px-3 py-2 text-sm text-emerald-800 disabled:opacity-60"
+                          onClick={() => rerollAudio(page)}
+                          disabled={Boolean(audioJob) || !page.audio_url}
+                          title="Regenerate this page with a random seed to get a different take."
+                        >
+                          <Dices size={16} />
+                          <span>Reroll</span>
                         </button>
                       </div>
                     </div>

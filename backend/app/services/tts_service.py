@@ -45,6 +45,26 @@ class TtsService:
         settings = get_settings()
         return settings.qwen_tts_model if settings.tts_provider == "qwen_local" else settings.openai_tts_model
 
+    def _fetch_service_json(self, path: str) -> dict | None:
+        settings = get_settings()
+        if settings.tts_provider != "qwen_local" or not settings.qwen_tts_endpoint:
+            return None
+        url = settings.qwen_tts_endpoint.rsplit("/", 1)[0] + path
+        try:
+            with request.urlopen(url, timeout=5) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except (URLError, json.JSONDecodeError, ValueError):
+            return None
+        return payload if isinstance(payload, dict) else None
+
+    def default_params(self) -> dict | None:
+        """Fetch the TTS service's env-configured tuning defaults, if reachable."""
+        return self._fetch_service_json("/params")
+
+    def speaker_instructs(self) -> dict | None:
+        """Fetch each speaker's effective default instruct, if reachable."""
+        return self._fetch_service_json("/speakers")
+
     def synthesize(
         self,
         text: str,
@@ -52,13 +72,14 @@ class TtsService:
         voice: str | None = None,
         language: str | None = None,
         instruct: str | None = None,
+        tts_params: dict | None = None,
         progress_callback: ProgressCallback | None = None,
     ) -> Path:
         settings = get_settings()
         output_path.parent.mkdir(parents=True, exist_ok=True)
         selected_voice = voice or self.default_voice
         if settings.tts_provider == "qwen_local":
-            return self._synthesize_qwen_local(text, output_path, selected_voice, language, instruct, progress_callback)
+            return self._synthesize_qwen_local(text, output_path, selected_voice, language, instruct, tts_params, progress_callback)
         return self._synthesize_openai(text, output_path, selected_voice, instruct)
 
     def _synthesize_openai(self, text: str, output_path: Path, voice: str, instruct: str | None = None) -> Path:
@@ -88,6 +109,7 @@ class TtsService:
         voice: str,
         language: str | None = None,
         instruct: str | None = None,
+        tts_params: dict | None = None,
         progress_callback: ProgressCallback | None = None,
     ) -> Path:
         settings = get_settings()
@@ -107,6 +129,8 @@ class TtsService:
             request_payload["language"] = language
         if instruct:
             request_payload["instruct"] = instruct
+        if tts_params:
+            request_payload["params"] = tts_params
         payload = json.dumps(request_payload).encode("utf-8")
         req = request.Request(
             settings.qwen_tts_endpoint,

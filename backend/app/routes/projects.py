@@ -110,6 +110,7 @@ def render_video(
         clean_tts_value(payload.voice) if payload else None,
         clean_tts_value(payload.language) if payload else None,
         clean_tts_value(payload.instruct) if payload else None,
+        payload.tts_params if payload else None,
         payload.force_regenerate if payload else False,
     )
     return JobCreated(job_id=job.id)
@@ -195,6 +196,7 @@ def run_render_video_job(
     voice: str | None = None,
     language: str | None = None,
     instruct: str | None = None,
+    tts_params: dict | None = None,
     force_regenerate: bool = False,
 ) -> None:
     db = SessionLocal()
@@ -241,6 +243,7 @@ def run_render_video_job(
                         voice,
                         language,
                         instruct,
+                        tts_params,
                         progress_callback=tts_progress.reporter(page.page_number),
                     ): (page, audio_path)
                     for page, audio_path in pages_to_synthesize

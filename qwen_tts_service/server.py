@@ -14,30 +14,31 @@ from typing import Any
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse, Response
 import numpy as np
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 import soundfile as sf
 
 
 MODEL_ID = os.getenv("QWEN_TTS_MODEL", "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice")
 DEVICE = os.getenv("QWEN_TTS_DEVICE", "cpu")
-ATTN_IMPLEMENTATION = os.getenv("QWEN_TTS_ATTN_IMPLEMENTATION", "eager")
-DEFAULT_INSTRUCT = os.getenv("QWEN_TTS_INSTRUCT", "Speak in a neutral, consistent, clear voice.")
+ATTN_IMPLEMENTATION = os.getenv("QWEN_TTS_ATTN_IMPLEMENTATION", "sdpa")
+DEFAULT_INSTRUCT = os.getenv("QWEN_TTS_INSTRUCT", "用平穩一致的講課語氣")
 SEED = int(os.getenv("QWEN_TTS_SEED", "316"))
 DO_SAMPLE = os.getenv("QWEN_TTS_DO_SAMPLE", "true").lower() == "true"
-TOP_K = int(os.getenv("QWEN_TTS_TOP_K", "50"))
-TOP_P = float(os.getenv("QWEN_TTS_TOP_P", "1.0"))
-TEMPERATURE = float(os.getenv("QWEN_TTS_TEMPERATURE", "0.7"))
+TOP_K = int(os.getenv("QWEN_TTS_TOP_K", "10"))
+TOP_P = float(os.getenv("QWEN_TTS_TOP_P", "0.8"))
+TEMPERATURE = float(os.getenv("QWEN_TTS_TEMPERATURE", "0.6"))
 REPETITION_PENALTY = float(os.getenv("QWEN_TTS_REPETITION_PENALTY", "1.05"))
 SUBTALKER_DOSAMPLE = os.getenv("QWEN_TTS_SUBTALKER_DOSAMPLE", "true").lower() == "true"
-SUBTALKER_TOP_K = int(os.getenv("QWEN_TTS_SUBTALKER_TOP_K", "50"))
-SUBTALKER_TOP_P = float(os.getenv("QWEN_TTS_SUBTALKER_TOP_P", "1.0"))
-SUBTALKER_TEMPERATURE = float(os.getenv("QWEN_TTS_SUBTALKER_TEMPERATURE", "0.7"))
-MAX_CHARS_PER_CHUNK = int(os.getenv("QWEN_TTS_MAX_CHARS_PER_CHUNK", "120"))
-MIN_CHUNK_CHARS = int(os.getenv("QWEN_TTS_MIN_CHUNK_CHARS", "6"))
-MAX_BATCH_CHUNKS = int(os.getenv("QWEN_TTS_MAX_BATCH_CHUNKS", "3"))
-MAX_NEW_TOKENS = int(os.getenv("QWEN_TTS_MAX_NEW_TOKENS", "512"))
+SUBTALKER_TOP_K = int(os.getenv("QWEN_TTS_SUBTALKER_TOP_K", "10"))
+SUBTALKER_TOP_P = float(os.getenv("QWEN_TTS_SUBTALKER_TOP_P", "0.8"))
+SUBTALKER_TEMPERATURE = float(os.getenv("QWEN_TTS_SUBTALKER_TEMPERATURE", "0.6"))
+MAX_CHARS_PER_CHUNK = int(os.getenv("QWEN_TTS_MAX_CHARS_PER_CHUNK", "200"))
+MIN_CHUNK_CHARS = int(os.getenv("QWEN_TTS_MIN_CHUNK_CHARS", "80"))
+MAX_BATCH_CHUNKS = int(os.getenv("QWEN_TTS_MAX_BATCH_CHUNKS", "32"))
+# 1024 new tokens ≈ 85s at the 12Hz codec; a 200-char Chinese chunk can run ~60s.
+MAX_NEW_TOKENS = int(os.getenv("QWEN_TTS_MAX_NEW_TOKENS", "1024"))
 
-SENTENCE_GAP_MS = int(os.getenv("QWEN_TTS_SENTENCE_GAP_MS", "550"))
+SENTENCE_GAP_MS = int(os.getenv("QWEN_TTS_SENTENCE_GAP_MS", "700"))
 SEMICOLON_GAP_MS = int(os.getenv("QWEN_TTS_SEMICOLON_GAP_MS", "350"))
 PARAGRAPH_GAP_MS = int(os.getenv("QWEN_TTS_PARAGRAPH_GAP_MS", "1000"))
 WRAP_GAP_MS = int(os.getenv("QWEN_TTS_WRAP_GAP_MS", "150"))
@@ -105,6 +106,34 @@ def set_progress(request_id: str | None, completed: int, total: int, status: str
             continue
 
 
+class TtsParams(BaseModel):
+    """Per-request tuning knobs; every field falls back to its env-configured default."""
+
+    model_config = {"extra": "ignore"}
+
+    seed: int = SEED
+    do_sample: bool = DO_SAMPLE
+    top_k: int = TOP_K
+    top_p: float = TOP_P
+    temperature: float = TEMPERATURE
+    repetition_penalty: float = REPETITION_PENALTY
+    subtalker_dosample: bool = SUBTALKER_DOSAMPLE
+    subtalker_top_k: int = SUBTALKER_TOP_K
+    subtalker_top_p: float = SUBTALKER_TOP_P
+    subtalker_temperature: float = SUBTALKER_TEMPERATURE
+    max_new_tokens: int = MAX_NEW_TOKENS
+    max_chars_per_chunk: int = MAX_CHARS_PER_CHUNK
+    min_chunk_chars: int = MIN_CHUNK_CHARS
+    sentence_gap_ms: int = SENTENCE_GAP_MS
+    semicolon_gap_ms: int = SEMICOLON_GAP_MS
+    paragraph_gap_ms: int = PARAGRAPH_GAP_MS
+    wrap_gap_ms: int = WRAP_GAP_MS
+    pause_default_ms: int = PAUSE_DEFAULT_MS
+    trim_threshold_db: float = TRIM_THRESHOLD_DB
+    trim_pad_ms: int = TRIM_PAD_MS
+    edge_fade_ms: int = EDGE_FADE_MS
+
+
 class TtsRequest(BaseModel):
     text: str | None = None
     input: str | None = None
@@ -116,6 +145,7 @@ class TtsRequest(BaseModel):
     response_format: str | None = "mp3"
     request_id: str | None = None
     include_timeline: bool = False
+    params: dict[str, Any] | None = None
 
 
 @dataclass
@@ -147,14 +177,14 @@ def load_model() -> Any:
     return model
 
 
-def set_generation_seed() -> None:
+def set_generation_seed(seed: int) -> None:
     import torch
 
-    random.seed(SEED)
-    np.random.seed(SEED)
-    torch.manual_seed(SEED)
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
     if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(SEED)
+        torch.cuda.manual_seed_all(seed)
 
 
 def infer_language(text: str, fallback: str) -> str:
@@ -181,13 +211,13 @@ def join_sentences(left: str, right: str) -> str:
     return f"{left} {right}"
 
 
-def boundary_gap_ms(sentence: str) -> int:
+def boundary_gap_ms(sentence: str, params: TtsParams) -> int:
     if sentence and sentence[-1] in "；;":
-        return SEMICOLON_GAP_MS
-    return SENTENCE_GAP_MS
+        return params.semicolon_gap_ms
+    return params.sentence_gap_ms
 
 
-def parse_segment(segment: str) -> list[ScriptChunk]:
+def parse_segment(segment: str, params: TtsParams) -> list[ScriptChunk]:
     """Split marker-free text into sentence chunks with punctuation-based gaps."""
     normalized = re.sub(r"\s+", " ", QUOTE_CHARS.sub("", segment)).strip()
     if not normalized:
@@ -195,28 +225,28 @@ def parse_segment(segment: str) -> list[ScriptChunk]:
     sentences = [part.strip() for part in SENTENCE_SPLIT.split(normalized) if part.strip()]
     merged: list[str] = []
     for sentence in sentences:
-        if merged and len(merged[-1]) < MIN_CHUNK_CHARS and len(merged[-1]) + len(sentence) <= MAX_CHARS_PER_CHUNK:
+        if merged and len(merged[-1]) < params.min_chunk_chars and len(merged[-1]) + len(sentence) <= params.max_chars_per_chunk:
             merged[-1] = join_sentences(merged[-1], sentence)
         else:
             merged.append(sentence)
-    if len(merged) >= 2 and len(merged[-1]) < MIN_CHUNK_CHARS and len(merged[-2]) + len(merged[-1]) <= MAX_CHARS_PER_CHUNK:
+    if len(merged) >= 2 and len(merged[-1]) < params.min_chunk_chars and len(merged[-2]) + len(merged[-1]) <= params.max_chars_per_chunk:
         trailing = merged.pop()
         merged[-1] = join_sentences(merged[-1], trailing)
     chunks: list[ScriptChunk] = []
     for sentence in merged:
-        parts = wrap_text(sentence, MAX_CHARS_PER_CHUNK) if len(sentence) > MAX_CHARS_PER_CHUNK else [sentence]
+        parts = wrap_text(sentence, params.max_chars_per_chunk) if len(sentence) > params.max_chars_per_chunk else [sentence]
         for part in parts[:-1]:
-            chunks.append(ScriptChunk(part, WRAP_GAP_MS))
-        chunks.append(ScriptChunk(parts[-1], boundary_gap_ms(sentence)))
+            chunks.append(ScriptChunk(part, params.wrap_gap_ms))
+        chunks.append(ScriptChunk(parts[-1], boundary_gap_ms(sentence, params)))
     return chunks
 
 
-def parse_paragraph(paragraph: str) -> list[ScriptChunk]:
+def parse_paragraph(paragraph: str, params: TtsParams) -> list[ScriptChunk]:
     chunks: list[ScriptChunk] = []
     position = 0
     for match in PAUSE_MARKER.finditer(paragraph):
-        pause_ms = int(match.group(1)) if match.group(1) else PAUSE_DEFAULT_MS
-        segment_chunks = parse_segment(paragraph[position : match.start()])
+        pause_ms = int(match.group(1)) if match.group(1) else params.pause_default_ms
+        segment_chunks = parse_segment(paragraph[position : match.start()], params)
         if segment_chunks:
             segment_chunks[-1].gap_after_ms = pause_ms
             segment_chunks[-1].explicit_gap = True
@@ -225,18 +255,18 @@ def parse_paragraph(paragraph: str) -> list[ScriptChunk]:
             chunks[-1].gap_after_ms += pause_ms
             chunks[-1].explicit_gap = True
         position = match.end()
-    chunks.extend(parse_segment(paragraph[position:]))
+    chunks.extend(parse_segment(paragraph[position:], params))
     return chunks
 
 
-def parse_script(text: str) -> list[ScriptChunk]:
+def parse_script(text: str, params: TtsParams) -> list[ScriptChunk]:
     chunks: list[ScriptChunk] = []
     for paragraph in re.split(r"\n\s*\n+", text.strip()):
-        paragraph_chunks = parse_paragraph(paragraph)
+        paragraph_chunks = parse_paragraph(paragraph, params)
         if not paragraph_chunks:
             continue
         if chunks and not chunks[-1].explicit_gap:
-            chunks[-1].gap_after_ms = PARAGRAPH_GAP_MS
+            chunks[-1].gap_after_ms = params.paragraph_gap_ms
         chunks.extend(paragraph_chunks)
     if chunks and not chunks[-1].explicit_gap:
         chunks[-1].gap_after_ms = 0
@@ -269,7 +299,7 @@ def chunked(items: list[str], size: int) -> list[list[str]]:
     return [items[index : index + batch_size] for index in range(0, len(items), batch_size)]
 
 
-def trim_edges(wav: np.ndarray, sr: int) -> np.ndarray:
+def trim_edges(wav: np.ndarray, sr: int, params: TtsParams) -> np.ndarray:
     """Cut the model's variable leading/trailing silence so inserted gaps stay exact."""
     if wav.size == 0:
         return wav
@@ -280,19 +310,19 @@ def trim_edges(wav: np.ndarray, sr: int) -> np.ndarray:
     peak = float(np.max(np.abs(wav)))
     if peak <= 0.0:
         return wav[:0]
-    threshold = peak * (10 ** (TRIM_THRESHOLD_DB / 20))
+    threshold = peak * (10 ** (params.trim_threshold_db / 20))
     rms = np.sqrt(np.mean(np.square(wav[: frames * frame_len].reshape(frames, frame_len)), axis=1))
     active = np.nonzero(rms > threshold)[0]
     if active.size == 0:
         return wav[:0]
-    pad = int(sr * TRIM_PAD_MS / 1000)
+    pad = int(sr * params.trim_pad_ms / 1000)
     start = max(active[0] * frame_len - pad, 0)
     end = min((active[-1] + 1) * frame_len + pad, len(wav))
     return wav[start:end]
 
 
-def apply_edge_fades(wav: np.ndarray, sr: int) -> np.ndarray:
-    fade_len = min(int(sr * EDGE_FADE_MS / 1000), len(wav) // 2)
+def apply_edge_fades(wav: np.ndarray, sr: int, params: TtsParams) -> np.ndarray:
+    fade_len = min(int(sr * params.edge_fade_ms / 1000), len(wav) // 2)
     if fade_len <= 0:
         return wav
     wav = wav.copy()
@@ -305,6 +335,18 @@ def apply_edge_fades(wav: np.ndarray, sr: int) -> np.ndarray:
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok", "model": MODEL_ID}
+
+
+@app.get("/params")
+def default_params() -> dict[str, Any]:
+    """Expose the env-configured defaults so clients can render tuning UIs."""
+    return TtsParams().model_dump()
+
+
+@app.get("/speakers")
+def speaker_instructs() -> dict[str, str]:
+    """Expose each speaker's effective default instruct (env-driven for English speakers)."""
+    return {name: config["instruct"] for name, config in SPEAKERS.items()}
 
 
 @app.get("/progress/{request_id}")
@@ -330,7 +372,12 @@ def tts(payload: TtsRequest) -> Response:
     if not speaker_config:
         raise HTTPException(status_code=400, detail=f"Unsupported speaker: {speaker}")
 
-    script_chunks = parse_script(text)
+    try:
+        params = TtsParams(**(payload.params or {}))
+    except (ValidationError, TypeError) as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid TTS params: {exc}") from exc
+
+    script_chunks = parse_script(text, params)
     if not script_chunks:
         raise HTTPException(status_code=400, detail="text contains no speakable content")
 
@@ -339,20 +386,22 @@ def tts(payload: TtsRequest) -> Response:
         spoken_text = PAUSE_MARKER.sub(" ", text)
         language = payload.language or infer_language(spoken_text, speaker_config["language"])
         chunk_texts = [chunk.text for chunk in script_chunks]
+        overridden = sorted(set(payload.params or {}) & set(TtsParams.model_fields))
         logger.info(
-            "Queueing TTS speaker=%s language=%s chars=%s chunks=%s seed=%s do_sample=%s subtalker_dosample=%s",
+            "Queueing TTS speaker=%s language=%s chars=%s chunks=%s seed=%s do_sample=%s subtalker_dosample=%s overrides=%s",
             speaker,
             language,
             len(text),
             len(chunk_texts),
-            SEED,
-            DO_SAMPLE,
-            SUBTALKER_DOSAMPLE,
+            params.seed,
+            params.do_sample,
+            params.subtalker_dosample,
+            {key: getattr(params, key) for key in overridden},
         )
         with generation_lock:
             started_at = time.perf_counter()
             qwen_model = load_model()
-            set_generation_seed()
+            set_generation_seed(params.seed)
             audio_chunks = []
             sr = None
             completed_chunks = 0
@@ -364,16 +413,16 @@ def tts(payload: TtsRequest) -> Response:
                     language=[language] * len(batch),
                     speaker=[speaker] * len(batch),
                     instruct=[payload.instruct or speaker_config["instruct"]] * len(batch),
-                    do_sample=DO_SAMPLE,
-                    top_k=TOP_K,
-                    top_p=TOP_P,
-                    temperature=TEMPERATURE,
-                    repetition_penalty=REPETITION_PENALTY,
-                    max_new_tokens=MAX_NEW_TOKENS,
-                    subtalker_dosample=SUBTALKER_DOSAMPLE,
-                    subtalker_top_k=SUBTALKER_TOP_K,
-                    subtalker_top_p=SUBTALKER_TOP_P,
-                    subtalker_temperature=SUBTALKER_TEMPERATURE,
+                    do_sample=params.do_sample,
+                    top_k=params.top_k,
+                    top_p=params.top_p,
+                    temperature=params.temperature,
+                    repetition_penalty=params.repetition_penalty,
+                    max_new_tokens=params.max_new_tokens,
+                    subtalker_dosample=params.subtalker_dosample,
+                    subtalker_top_k=params.subtalker_top_k,
+                    subtalker_top_p=params.subtalker_top_p,
+                    subtalker_temperature=params.subtalker_temperature,
                 )
                 sr = chunk_sr
                 audio_chunks.extend(wavs)
@@ -394,7 +443,7 @@ def tts(payload: TtsRequest) -> Response:
             cursor_samples = 0
             for chunk_meta, audio_chunk in zip(script_chunks, audio_chunks):
                 processed = np.asarray(audio_chunk, dtype=np.float32).reshape(-1)
-                processed = apply_edge_fades(trim_edges(processed, sample_rate), sample_rate)
+                processed = apply_edge_fades(trim_edges(processed, sample_rate, params), sample_rate, params)
                 wav_parts.append(processed)
                 timeline.append(
                     {

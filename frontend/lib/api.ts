@@ -52,17 +52,22 @@ export type Job = {
   updated_at: string;
 };
 
+export type TtsParamValue = number | boolean;
+
 export type TtsConfig = {
   provider: string;
   model: string;
   default_voice: string;
   voices: {id: string; label: string}[];
+  params?: Record<string, TtsParamValue> | null;
+  speaker_instructs?: Record<string, string> | null;
 };
 
 export type TtsOptions = {
   voice?: string;
   language?: string;
   instruct?: string;
+  tts_params?: Record<string, TtsParamValue>;
 };
 
 async function parseResponse<T>(response: Response): Promise<T> {
