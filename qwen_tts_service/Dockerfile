@@ -6,7 +6,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     XDG_CACHE_HOME=/models/cache
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg libsndfile1 curl \
+    && apt-get install -y --no-install-recommends ffmpeg libsndfile1 curl gcc libc6-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

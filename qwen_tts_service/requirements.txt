@@ -1,4 +1,11 @@
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
-qwen-tts
-soundfile
+qwen-tts==0.1.1
+soundfile==0.14.0
+# Pin heavy transitive deps so rebuilds on new machines are reproducible
+# (unpinned torch/triton drift caused the missing-C-compiler JIT failure).
+torch==2.13.0
+torchaudio==2.11.0
+transformers==4.57.3
+triton==3.7.1
+numpy==2.4.6
