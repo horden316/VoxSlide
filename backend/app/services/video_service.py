@@ -3,14 +3,11 @@ import re
 import subprocess
 
 from ..config import get_settings
-from .pause_markers import PAUSE_DEFAULT_MS, PAUSE_MARKER
+from .pause_markers import strip_pause_markers
+from .pronunciation_markers import to_display_text
 
 
 class VideoService:
-    # Mirrors the qwen service paragraph gap so cue timing tracks the audio.
-    PARAGRAPH_PAUSE_MS = 1000
-    # Approximate speech rate used to convert pause seconds into caption weight units.
-    PAUSE_WEIGHT_CHARS_PER_SECOND = 4.0
     # Cue sizing follows common subtitle conventions: 42 width units per line
     # (Latin chars count 1, CJK chars 2), at most two lines per cue.
     MAX_LINE_WIDTH = 42
@@ -122,11 +119,12 @@ class VideoService:
             # later pages aligned with the concatenated video.
             slot_duration = slot_duration if slot_duration > 0 else audio_duration
             caption_span = min(audio_duration, slot_duration)
-            cues = (
-                self._cues_from_timeline(timeline, caption_span)
-                if timeline
-                else self._cues_from_weights(text, caption_span)
-            )
+            if not timeline:
+                # Audio predating timeline sidecars: treat the page as a single
+                # chunk so cue timing falls back to character-weight
+                # interpolation across the whole span.
+                timeline = [{"text": strip_pause_markers(text), "start": 0.0, "end": caption_span}]
+            cues = self._cues_from_timeline(timeline, caption_span)
             for cue_text, cue_start, cue_end in cues:
                 entries.append(
                     "\n".join(
@@ -146,7 +144,9 @@ class VideoService:
         """Anchor cues to the synthesized chunks' measured start/end times."""
         chunks: list[tuple[str, float, float]] = []
         for entry in timeline:
-            chunk_text = str(entry.get("text") or "").strip()
+            # Timelines written before the pronunciation feature may still
+            # carry raw markers; resolving here keeps their subtitles clean.
+            chunk_text = to_display_text(str(entry.get("text") or "")).strip()
             try:
                 start = float(entry["start"])
                 end = float(entry["end"])
@@ -179,55 +179,6 @@ class VideoService:
                 cues.append((self._wrap_cue_lines(cue_text), cue_start, cue_end))
                 cue_start = cue_end
         return cues
-
-    def _cues_from_weights(self, text: str, caption_span: float) -> list[tuple[str, float, float]]:
-        """Fallback for audio without timing metadata: distribute by character weight."""
-        chunks = self._split_caption_text(text)
-        if not chunks:
-            return []
-        chunk_weights = [
-            self._caption_weight(chunk) + pause_seconds * self.PAUSE_WEIGHT_CHARS_PER_SECOND
-            for chunk, pause_seconds in chunks
-        ]
-        total_weight = sum(chunk_weights)
-        cues: list[tuple[str, float, float]] = []
-        cue_start = 0.0
-        for chunk_position, ((chunk, _), weight) in enumerate(zip(chunks, chunk_weights), start=1):
-            cue_end = (
-                caption_span
-                if chunk_position == len(chunks)
-                else cue_start + caption_span * weight / total_weight
-            )
-            cues.append((self._wrap_cue_lines(chunk), cue_start, cue_end))
-            cue_start = cue_end
-        return cues
-
-    def _split_caption_text(self, text: str) -> list[tuple[str, float]]:
-        """Split into caption chunks, each paired with the pause seconds that follow it."""
-        annotated = re.sub(r"\n\s*\n+", f" [pause:{self.PARAGRAPH_PAUSE_MS}] ", text.strip())
-        chunks: list[tuple[str, float]] = []
-        position = 0
-        for match in PAUSE_MARKER.finditer(annotated):
-            pause_ms = int(match.group(1)) if match.group(1) else PAUSE_DEFAULT_MS
-            self._append_caption_segment(chunks, annotated[position : match.start()], pause_ms / 1000)
-            position = match.end()
-        self._append_caption_segment(chunks, annotated[position:], 0.0)
-        return chunks
-
-    def _append_caption_segment(
-        self,
-        chunks: list[tuple[str, float]],
-        segment: str,
-        pause_after: float,
-    ) -> None:
-        segment_chunks = self._chunk_caption_segment(segment, self.MAX_CUE_WIDTH)
-        for chunk in segment_chunks[:-1]:
-            chunks.append((chunk, 0.0))
-        if segment_chunks:
-            chunks.append((segment_chunks[-1], pause_after))
-        elif chunks:
-            last_text, last_pause = chunks[-1]
-            chunks[-1] = (last_text, last_pause + pause_after)
 
     def _chunk_caption_segment(self, text: str, max_width: int) -> list[str]:
         normalized = re.sub(r"\s+", " ", text.strip())

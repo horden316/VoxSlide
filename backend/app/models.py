@@ -21,6 +21,8 @@ class Project(Base, TimestampMixin):
     original_pdf_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     output_video_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     status: Mapped[str] = mapped_column(String(64), default="created")
+    # JSON list of {"display": ..., "read": ...} pronunciation glossary entries.
+    glossary: Mapped[str] = mapped_column(Text, default="[]", server_default="[]")
 
     pages: Mapped[list["Page"]] = relationship(
         back_populates="project", cascade="all, delete-orphan", order_by="Page.page_number"

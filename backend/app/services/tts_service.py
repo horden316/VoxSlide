@@ -1,14 +1,17 @@
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Callable
 import base64
 import json
+import subprocess
+import tempfile
 import threading
 import uuid
 from urllib import request
 from urllib.error import URLError
 from openai import OpenAI
 from ..config import get_settings
-from .pause_markers import strip_pause_markers
+from .script_chunks import ScriptChunk, parse_script
 
 ProgressCallback = Callable[[int, int], None]
 
@@ -110,30 +113,102 @@ class TtsService:
             return self._synthesize_local_service(
                 "Kokoro", settings.kokoro_tts_endpoint, text, output_path, selected_voice, language, instruct, tts_params, progress_callback
             )
-        return self._synthesize_openai(text, output_path, selected_voice, instruct)
+        return self._synthesize_openai(text, output_path, selected_voice, instruct, progress_callback)
 
-    def _synthesize_openai(self, text: str, output_path: Path, voice: str, instruct: str | None = None) -> Path:
+    def _synthesize_openai(
+        self,
+        text: str,
+        output_path: Path,
+        voice: str,
+        instruct: str | None = None,
+        progress_callback: ProgressCallback | None = None,
+    ) -> Path:
         settings = get_settings()
         if not settings.openai_api_key:
             raise RuntimeError("OPENAI_API_KEY is not configured")
-        # OpenAI synthesis has no chunk timeline, so a sidecar left by an earlier
-        # Qwen run must not survive to describe this new audio.
-        timeline_sidecar_path(output_path).unlink(missing_ok=True)
+        # OpenAI has no chunking service, so the backend chunks the script itself
+        # and measures each clip, giving subtitles the same timeline sidecar the
+        # local services produce.
+        chunks = parse_script(text)
+        if not chunks:
+            raise RuntimeError("Transcript contains no speakable content")
+        timeline_path = timeline_sidecar_path(output_path)
+        timeline_path.unlink(missing_ok=True)
         client = OpenAI(api_key=settings.openai_api_key)
-        speech_args = {
-            "model": settings.openai_tts_model,
-            "voice": voice,
-            # OpenAI TTS has no pause-marker support, so drop them instead of reading them aloud.
-            "input": strip_pause_markers(text),
-            "response_format": "mp3",
-        }
-        if instruct:
-            speech_args["instructions"] = instruct
-        with client.audio.speech.with_streaming_response.create(
-            **speech_args,
-        ) as response:
-            response.stream_to_file(output_path)
+
+        def synthesize_chunk(index_chunk: tuple[int, ScriptChunk]) -> tuple[int, Path]:
+            index, chunk = index_chunk
+            chunk_path = Path(scratch_dir) / f"chunk-{index:04d}.mp3"
+            speech_args = {
+                "model": settings.openai_tts_model,
+                "voice": voice,
+                "input": chunk.text,
+                "response_format": "mp3",
+            }
+            if instruct:
+                speech_args["instructions"] = instruct
+            with client.audio.speech.with_streaming_response.create(**speech_args) as response:
+                response.stream_to_file(chunk_path)
+            return index, chunk_path
+
+        with tempfile.TemporaryDirectory(prefix="openai-tts-") as scratch_dir:
+            chunk_paths: dict[int, Path] = {}
+            completed = 0
+            with ThreadPoolExecutor(max_workers=min(4, len(chunks))) as executor:
+                for index, chunk_path in executor.map(synthesize_chunk, enumerate(chunks)):
+                    chunk_paths[index] = chunk_path
+                    completed += 1
+                    if progress_callback:
+                        progress_callback(completed, len(chunks))
+            durations = [self._probe_duration(chunk_paths[index]) for index in range(len(chunks))]
+            self._assemble_openai_audio(chunks, chunk_paths, output_path)
+
+        timeline: list[dict] = []
+        cursor = 0.0
+        for chunk, duration in zip(chunks, durations):
+            timeline.append(
+                {
+                    "text": chunk.display_text,
+                    "start": round(cursor, 3),
+                    "end": round(cursor + duration, 3),
+                }
+            )
+            cursor += duration + chunk.gap_after_ms / 1000
+        timeline_path.write_text(json.dumps(timeline, ensure_ascii=False), encoding="utf-8")
         return output_path
+
+    def _probe_duration(self, audio_path: Path) -> float:
+        result = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", str(audio_path)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr or "ffprobe failed")
+        return float(result.stdout.strip())
+
+    def _assemble_openai_audio(self, chunks: list[ScriptChunk], chunk_paths: dict[int, Path], output_path: Path) -> None:
+        """Concatenate the per-chunk clips with their silence gaps into one mp3."""
+        command = ["ffmpeg", "-y"]
+        filter_inputs: list[str] = []
+        filters: list[str] = []
+        input_count = 0
+        for index, chunk in enumerate(chunks):
+            command += ["-i", str(chunk_paths[index])]
+            # The concat filter needs uniform sample rates and layouts.
+            filters.append(f"[{input_count}:a]aresample=24000,aformat=channel_layouts=mono[a{input_count}]")
+            filter_inputs.append(f"[a{input_count}]")
+            input_count += 1
+            if chunk.gap_after_ms > 0:
+                command += ["-f", "lavfi", "-t", f"{chunk.gap_after_ms / 1000:.3f}", "-i", "anullsrc=r=24000:cl=mono"]
+                filter_inputs.append(f"[{input_count}:a]")
+                input_count += 1
+        filters.append(f"{''.join(filter_inputs)}concat=n={len(filter_inputs)}:v=0:a=1[out]")
+        command += ["-filter_complex", ";".join(filters), "-map", "[out]", "-b:a", "192k", str(output_path)]
+        result = subprocess.run(command, capture_output=True, text=True, check=False)
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr or "FFmpeg concat failed")
 
     def _synthesize_local_service(
         self,

@@ -1,8 +1,9 @@
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.orm import Session
 from ..database import SessionLocal, get_db
-from ..models import Job, Page
+from ..models import Job, Page, Project
 from ..schemas import GenerateAudioRequest, JobCreated, PageOut, PagePatch, TtsConfigOut
+from ..services.pronunciation_markers import apply_glossary, parse_glossary
 from ..services.tts_service import TtsService
 from ..services.video_service import VideoService
 from ..storage import project_dir, public_file_url
@@ -16,6 +17,12 @@ def clean_tts_value(value: str | None) -> str | None:
         return None
     cleaned = value.strip()
     return cleaned or None
+
+
+def transcript_for_tts(db: Session, page: Page) -> str:
+    """Expand the project glossary into pronunciation markers for synthesis."""
+    project = db.get(Project, page.project_id)
+    return apply_glossary(page.transcript, parse_glossary(project.glossary if project else None))
 
 
 def serialize_page(page: Page) -> PageOut:
@@ -79,7 +86,7 @@ def generate_audio(page_id: int, payload: GenerateAudioRequest | None = None, db
     audio_path = project_dir(page.project_id) / "audio" / f"page-{page.page_number:04d}.mp3"
     try:
         TtsService().synthesize(
-            page.transcript,
+            transcript_for_tts(db, page),
             audio_path,
             clean_tts_value(payload.voice) if payload else None,
             clean_tts_value(payload.language) if payload else None,
@@ -169,7 +176,7 @@ def run_generate_audio_job(
             finally:
                 session.close()
 
-        TtsService().synthesize(page.transcript, audio_path, voice, language, instruct, tts_params, progress_callback=report_tts_progress, provider=provider)
+        TtsService().synthesize(transcript_for_tts(db, page), audio_path, voice, language, instruct, tts_params, progress_callback=report_tts_progress, provider=provider)
         update_audio_job(db, job, progress=85)
         page.audio_path = str(audio_path)
         page.audio_duration = VideoService().probe_duration(audio_path)

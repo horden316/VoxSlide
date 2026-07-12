@@ -9,8 +9,9 @@ from sqlalchemy.orm import Session
 from ..config import get_settings
 from ..database import SessionLocal, get_db
 from ..models import Job, Page, Project
-from ..schemas import JobCreated, ProjectCreate, ProjectOut, RenderVideoRequest
+from ..schemas import GlossaryEntry, GlossaryOut, JobCreated, ProjectCreate, ProjectOut, RenderVideoRequest
 from ..services.pdf_service import PdfService
+from ..services.pronunciation_markers import apply_glossary, parse_glossary
 from ..services.tts_service import TtsService, timeline_sidecar_path
 from ..services.video_service import VideoService
 from ..storage import project_dir, safe_storage_path, unique_filename
@@ -50,6 +51,32 @@ def get_project(project_id: int, db: Session = Depends(get_db)) -> Project:
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     return project
+
+
+@router.get("/{project_id}/glossary", response_model=GlossaryOut)
+def get_glossary(project_id: int, db: Session = Depends(get_db)) -> GlossaryOut:
+    project = db.get(Project, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    entries = [GlossaryEntry(display=display, read=read) for display, read in parse_glossary(project.glossary)]
+    return GlossaryOut(entries=entries)
+
+
+@router.put("/{project_id}/glossary", response_model=GlossaryOut)
+def update_glossary(project_id: int, payload: GlossaryOut, db: Session = Depends(get_db)) -> GlossaryOut:
+    project = db.get(Project, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    stored = json.dumps(
+        [{"display": entry.display.strip(), "read": entry.read.strip()} for entry in payload.entries],
+        ensure_ascii=False,
+    )
+    # Round-trip through the parser so the client sees which entries survived
+    # validation (empty sides or bracket/pipe characters get dropped).
+    project.glossary = stored
+    db.commit()
+    entries = [GlossaryEntry(display=display, read=read) for display, read in parse_glossary(stored)]
+    return GlossaryOut(entries=entries)
 
 
 @router.post("/{project_id}/upload-pdf", response_model=list[dict])
@@ -235,6 +262,7 @@ def run_render_video_job(
                 pages_to_synthesize.append((page, audio_dir / f"page-{page.page_number:04d}.mp3"))
 
         if pages_to_synthesize:
+            glossary = parse_glossary(project.glossary)
             resolved_provider = tts.resolve_provider(provider)
             concurrency = settings.kokoro_tts_workers + 1 if resolved_provider == "kokoro_local" else settings.tts_workers
             tts_workers = min(concurrency, len(pages_to_synthesize))
@@ -242,7 +270,7 @@ def run_render_video_job(
                 futures = {
                     executor.submit(
                         tts.synthesize,
-                        page.transcript,
+                        apply_glossary(page.transcript, glossary),
                         audio_path,
                         voice,
                         language,

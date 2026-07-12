@@ -41,6 +41,14 @@ logger = logging.getLogger("kokoro_tts_service")
 logging.basicConfig(level=logging.INFO)
 
 PAUSE_MARKER = re.compile(r"\[pause(?::\s*(\d+)\s*(?:ms)?)?\]", re.IGNORECASE)
+# Keep in sync with PRONUNCIATION_MARKER in backend/app/services/pronunciation_markers.py.
+# [dis:display text|read:spoken text] — synthesis reads the read side while the
+# timeline reports the dis side, so subtitles show the original spelling.
+PRONUNCIATION_MARKER = re.compile(r"\[dis:([^|\[\]]*)\|read:([^\[\]]*)\]", re.IGNORECASE)
+# Each pronunciation marker is swapped for one private-use character before
+# chunking so sentence splitting and wrapping can never cut a marker apart.
+PRONUNCIATION_PLACEHOLDER_BASE = 0xE000
+PRONUNCIATION_PLACEHOLDER = re.compile("[-]")
 QUOTE_CHARS = re.compile(r"[\"“”„‟«»「」『』＂]")
 SENTENCE_SPLIT = re.compile(r"(?<=[。！？；])\s*|(?<=[!?;.])\s+")
 CJK_CHAR = re.compile(r"[　-ヿ㐀-䶿一-鿿가-힯＀-￯]")
@@ -118,6 +126,30 @@ class ScriptChunk:
     text: str
     gap_after_ms: int
     explicit_gap: bool = False
+    display_text: str = ""
+
+
+def extract_pronunciation_markers(text: str) -> tuple[str, list[tuple[str, str]]]:
+    pronunciations: list[tuple[str, str]] = []
+
+    def replace(match: re.Match) -> str:
+        display = match.group(1).strip()
+        spoken = match.group(2).strip() or display
+        pronunciations.append((display, spoken))
+        return chr(PRONUNCIATION_PLACEHOLDER_BASE + len(pronunciations) - 1)
+
+    return PRONUNCIATION_MARKER.sub(replace, text), pronunciations
+
+
+def expand_pronunciations(text: str, pronunciations: list[tuple[str, str]], spoken: bool) -> str:
+    def replace(match: re.Match) -> str:
+        index = ord(match.group(0)) - PRONUNCIATION_PLACEHOLDER_BASE
+        if 0 <= index < len(pronunciations):
+            display, read = pronunciations[index]
+            return read if spoken else display
+        return ""
+
+    return PRONUNCIATION_PLACEHOLDER.sub(replace, text)
 
 
 def load_pipeline(lang_code: str) -> Any:
@@ -189,8 +221,9 @@ def parse_paragraph(paragraph: str, params: TtsParams) -> list[ScriptChunk]:
 
 
 def parse_script(text: str, params: TtsParams) -> list[ScriptChunk]:
+    protected, pronunciations = extract_pronunciation_markers(text)
     chunks: list[ScriptChunk] = []
-    for paragraph in re.split(r"\n\s*\n+", text.strip()):
+    for paragraph in re.split(r"\n\s*\n+", protected.strip()):
         paragraph_chunks = parse_paragraph(paragraph, params)
         if not paragraph_chunks:
             continue
@@ -199,6 +232,10 @@ def parse_script(text: str, params: TtsParams) -> list[ScriptChunk]:
         chunks.extend(paragraph_chunks)
     if chunks and not chunks[-1].explicit_gap:
         chunks[-1].gap_after_ms = 0
+    for chunk in chunks:
+        placeholder_text = chunk.text
+        chunk.text = expand_pronunciations(placeholder_text, pronunciations, spoken=True)
+        chunk.display_text = expand_pronunciations(placeholder_text, pronunciations, spoken=False)
     return chunks
 
 
@@ -332,7 +369,7 @@ def tts(payload: TtsRequest) -> Response:
                 wav_parts.append(processed)
                 timeline.append(
                     {
-                        "text": chunk_meta.text,
+                        "text": chunk_meta.display_text or chunk_meta.text,
                         "start": round(cursor_samples / SAMPLE_RATE, 3),
                         "end": round((cursor_samples + len(processed)) / SAMPLE_RATE, 3),
                     }

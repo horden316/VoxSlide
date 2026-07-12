@@ -52,6 +52,11 @@ export type Job = {
   updated_at: string;
 };
 
+export type GlossaryEntry = {
+  display: string;
+  read: string;
+};
+
 export type TtsParamValue = number | boolean;
 
 export type TtsConfig = {
@@ -142,5 +147,17 @@ export const api = {
   },
   async getJob(jobId: number) {
     return parseResponse<Job>(await fetch(`${API_BASE_URL}/api/jobs/${jobId}`));
+  },
+  async getGlossary(projectId: number) {
+    return parseResponse<{entries: GlossaryEntry[]}>(await fetch(`${API_BASE_URL}/api/projects/${projectId}/glossary`));
+  },
+  async saveGlossary(projectId: number, entries: GlossaryEntry[]) {
+    return parseResponse<{entries: GlossaryEntry[]}>(
+      await fetch(`${API_BASE_URL}/api/projects/${projectId}/glossary`, {
+        method: "PUT",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({entries}),
+      }),
+    );
   },
 };

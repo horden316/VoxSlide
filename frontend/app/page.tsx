@@ -1,9 +1,9 @@
 "use client";
 
 import {useEffect, useMemo, useRef, useState} from "react";
-import {ChevronDown, Dices, Download, FileText, FileUp, Play, Plus, RefreshCw, RotateCcw, Save, SlidersHorizontal, Upload} from "lucide-react";
+import {BookA, ChevronDown, Dices, Download, FileText, FileUp, Play, Plus, RefreshCw, RotateCcw, Save, SlidersHorizontal, Upload, X} from "lucide-react";
 import {API_BASE_URL, api} from "@/lib/api";
-import type {Job, Project, SlidePage, TtsConfig, TtsOptions, TtsParamValue} from "@/lib/api";
+import type {GlossaryEntry, Job, Project, SlidePage, TtsConfig, TtsOptions, TtsParamValue} from "@/lib/api";
 
 type AudioJobState = {
   id: number;
@@ -192,6 +192,8 @@ export default function Home() {
   const [forceRegenerate, setForceRegenerate] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [paramOverrides, setParamOverrides] = useState<Record<string, string>>({});
+  const [glossary, setGlossary] = useState<GlossaryEntry[]>([]);
+  const [glossaryOpen, setGlossaryOpen] = useState(false);
   const transcriptRefs = useRef<Record<number, HTMLTextAreaElement | null>>({});
 
   const downloadUrl = useMemo(
@@ -204,18 +206,31 @@ export default function Home() {
   );
   const hasCompletedVideo = selectedProject?.status === "completed" || jobStatus === "completed";
 
-  function insertPauseMarker(page: SlidePage) {
-    const marker = "[pause]";
+  function insertAtCursor(page: SlidePage, buildMarker: (selected: string) => {marker: string; cursorOffset: number}) {
     const textarea = transcriptRefs.current[page.id];
     const start = textarea?.selectionStart ?? page.transcript.length;
     const end = textarea?.selectionEnd ?? start;
+    const {marker, cursorOffset} = buildMarker(page.transcript.slice(start, end));
     const transcript = `${page.transcript.slice(0, start)}${marker}${page.transcript.slice(end)}`;
     setPages((current) => current.map((item) => (item.id === page.id ? {...item, transcript} : item)));
     requestAnimationFrame(() => {
       if (!textarea) return;
       textarea.focus();
-      const cursor = start + marker.length;
+      const cursor = start + cursorOffset;
       textarea.setSelectionRange(cursor, cursor);
+    });
+  }
+
+  function insertPauseMarker(page: SlidePage) {
+    insertAtCursor(page, () => ({marker: "[pause]", cursorOffset: "[pause]".length}));
+  }
+
+  function insertPronunciationMarker(page: SlidePage) {
+    insertAtCursor(page, (selected) => {
+      const marker = `[dis:${selected}|read:]`;
+      // Land the cursor where the missing side goes: after "read:" when the
+      // selection filled the dis side, otherwise after "dis:".
+      return {marker, cursorOffset: selected ? marker.length - 1 : "[dis:".length};
     });
   }
 
@@ -241,8 +256,6 @@ export default function Home() {
   const isQwenProvider = ttsConfig?.provider === "qwen_local";
   // Kokoro has fixed voices with no style prompt; Qwen and OpenAI both accept one.
   const supportsInstruct = ttsConfig?.provider === "qwen_local" || ttsConfig?.provider === "openai";
-  // Both local services convert [pause] markers into real silence gaps.
-  const supportsPauseMarkers = ttsConfig?.provider === "qwen_local" || ttsConfig?.provider === "kokoro_local";
 
   async function changeProvider(providerId: string) {
     setSelectedProvider(providerId);
@@ -322,6 +335,10 @@ export default function Home() {
   useEffect(() => {
     if (selectedProject) {
       refreshPages(selectedProject.id).catch((error) => setMessage(error.message));
+      api
+        .getGlossary(selectedProject.id)
+        .then((result) => setGlossary(result.entries))
+        .catch((error) => setMessage(error instanceof Error ? error.message : "Could not load glossary."));
     }
   }, [selectedProject?.id]);
 
@@ -405,6 +422,22 @@ export default function Home() {
       setMessage(error instanceof Error ? error.message : "PDF upload failed.");
     } finally {
       setBusy(false);
+    }
+  }
+
+  function updateGlossaryEntry(index: number, field: keyof GlossaryEntry, value: string) {
+    setGlossary((current) => current.map((entry, position) => (position === index ? {...entry, [field]: value} : entry)));
+  }
+
+  async function saveGlossary() {
+    if (!selectedProject) return;
+    setMessage("");
+    try {
+      const saved = await api.saveGlossary(selectedProject.id, glossary);
+      setGlossary(saved.entries);
+      setMessage(`Glossary saved (${saved.entries.length} terms).`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Glossary save failed.");
     }
   }
 
@@ -742,6 +775,68 @@ export default function Home() {
             </div>
           )}
 
+          {selectedProject && (
+            <div className="mb-4 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+              <button
+                className="inline-flex items-center gap-2 text-sm font-medium text-slate-900"
+                onClick={() => setGlossaryOpen((open) => !open)}
+              >
+                <BookA size={16} />
+                <span>Pronunciation glossary</span>
+                {glossary.length > 0 && (
+                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-600">{glossary.length} terms</span>
+                )}
+                <ChevronDown size={14} className={`transition-transform ${glossaryOpen ? "rotate-180" : ""}`} />
+              </button>
+              {glossaryOpen && (
+                <div className="mt-3">
+                  <p className="mb-3 text-xs text-slate-500">
+                    Applied automatically whenever audio is generated: subtitles keep the display text while the voice reads the read text.
+                    Inline [dis:…|read:…] markers in a transcript take precedence over the glossary.
+                  </p>
+                  <div className="grid gap-2">
+                    {glossary.map((entry, index) => (
+                      <div key={index} className="flex items-center gap-2">
+                        <input
+                          className="min-w-0 flex-1 rounded-md border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-slate-700"
+                          value={entry.display}
+                          onChange={(event) => updateGlossaryEntry(index, "display", event.target.value)}
+                          placeholder="Display text (subtitle)"
+                        />
+                        <input
+                          className="min-w-0 flex-1 rounded-md border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-slate-700"
+                          value={entry.read}
+                          onChange={(event) => updateGlossaryEntry(index, "read", event.target.value)}
+                          placeholder="Read text (spoken)"
+                        />
+                        <button
+                          className="grid h-8 w-8 shrink-0 place-items-center rounded-md border border-slate-300 text-slate-500 hover:border-slate-500 hover:text-slate-900"
+                          onClick={() => setGlossary((current) => current.filter((_, position) => position !== index))}
+                          title="Remove term"
+                        >
+                          <X size={14} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="mt-3 flex gap-2">
+                    <button
+                      className="inline-flex items-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-sm"
+                      onClick={() => setGlossary((current) => [...current, {display: "", read: ""}])}
+                    >
+                      <Plus size={14} />
+                      <span>Add term</span>
+                    </button>
+                    <button className="inline-flex items-center gap-2 rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white" onClick={saveGlossary}>
+                      <Save size={14} />
+                      <span>Save glossary</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           {(message || jobStatus) && (
             <div className="mb-4 rounded-lg border border-slate-200 bg-white p-4 text-sm shadow-sm">
               {message && <div>{message}</div>}
@@ -815,8 +910,7 @@ export default function Home() {
                         )}
                       </div>
                     </div>
-                    {supportsPauseMarkers && (
-                    <div className="mb-1 flex justify-end">
+                    <div className="mb-1 flex justify-end gap-2">
                       <button
                         className="inline-flex items-center gap-1 rounded border border-dashed border-slate-300 px-2 py-1 font-mono text-xs text-slate-500 hover:border-slate-500 hover:text-slate-900"
                         onClick={() => insertPauseMarker(page)}
@@ -825,8 +919,15 @@ export default function Home() {
                         <Plus size={12} />
                         <span>[pause]</span>
                       </button>
+                      <button
+                        className="inline-flex items-center gap-1 rounded border border-dashed border-slate-300 px-2 py-1 font-mono text-xs text-slate-500 hover:border-slate-500 hover:text-slate-900"
+                        onClick={() => insertPronunciationMarker(page)}
+                        title="Insert a pronunciation marker: subtitles show the dis text while the voice reads the read text. Select a word first to use it as the dis side."
+                      >
+                        <Plus size={12} />
+                        <span>[dis|read]</span>
+                      </button>
                     </div>
-                    )}
                     <textarea
                       ref={(element) => {
                         transcriptRefs.current[page.id] = element;

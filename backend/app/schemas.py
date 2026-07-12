@@ -23,6 +23,15 @@ class PagePatch(BaseModel):
     transcript: str
 
 
+class GlossaryEntry(BaseModel):
+    display: str
+    read: str
+
+
+class GlossaryOut(BaseModel):
+    entries: list[GlossaryEntry]
+
+
 class GenerateAudioRequest(BaseModel):
     provider: str | None = None
     voice: str | None = None
