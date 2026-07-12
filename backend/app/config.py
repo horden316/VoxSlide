@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     openai_api_key: str | None = None
     openai_tts_model: str = "gpt-4o-mini-tts"
     openai_tts_voice: str = "alloy"
+    openai_tts_voices: str = "alloy:Alloy,ash:Ash,ballad:Ballad,coral:Coral,echo:Echo,fable:Fable,nova:Nova,onyx:Onyx,sage:Sage,shimmer:Shimmer,verse:Verse"
     qwen_tts_endpoint: str | None = "http://localhost:7860/tts"
     qwen_tts_model: str = "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"
     qwen_tts_voice: str = "Ryan"

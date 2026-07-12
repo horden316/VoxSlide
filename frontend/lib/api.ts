@@ -64,6 +64,7 @@ export type TtsConfig = {
 };
 
 export type TtsOptions = {
+  provider?: string;
   voice?: string;
   language?: string;
   instruct?: string;
@@ -94,8 +95,9 @@ export const api = {
   async getPages(projectId: number) {
     return parseResponse<SlidePage[]>(await fetch(`${API_BASE_URL}/api/projects/${projectId}/pages`));
   },
-  async getTtsConfig() {
-    return parseResponse<TtsConfig>(await fetch(`${API_BASE_URL}/api/tts/config`));
+  async getTtsConfig(provider?: string) {
+    const query = provider ? `?provider=${encodeURIComponent(provider)}` : "";
+    return parseResponse<TtsConfig>(await fetch(`${API_BASE_URL}/api/tts/config${query}`));
   },
   async uploadPdf(projectId: number, file: File) {
     const form = new FormData();

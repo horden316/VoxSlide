@@ -12,6 +12,8 @@ from .pause_markers import strip_pause_markers
 
 ProgressCallback = Callable[[int, int], None]
 
+VALID_PROVIDERS = ("qwen_local", "openai")
+
 
 def timeline_sidecar_path(audio_path: Path) -> Path:
     """Where the per-chunk timing metadata for an audio file lives."""
@@ -19,9 +21,15 @@ def timeline_sidecar_path(audio_path: Path) -> Path:
 
 
 class TtsService:
-    def available_voices(self) -> list[dict[str, str]]:
+    def resolve_provider(self, provider: str | None = None) -> str:
+        value = (provider or get_settings().tts_provider or "").strip()
+        if value not in VALID_PROVIDERS:
+            raise RuntimeError(f"Unknown TTS provider: {value!r} (expected one of {', '.join(VALID_PROVIDERS)})")
+        return value
+
+    def available_voices(self, provider: str | None = None) -> list[dict[str, str]]:
         settings = get_settings()
-        raw_voices = settings.qwen_tts_voices if settings.tts_provider == "qwen_local" else settings.openai_tts_voice
+        raw_voices = settings.qwen_tts_voices if self.resolve_provider(provider) == "qwen_local" else settings.openai_tts_voices
         voices: list[dict[str, str]] = []
         for raw_voice in raw_voices.split(","):
             value = raw_voice.strip()
@@ -31,23 +39,21 @@ class TtsService:
             voice_id = voice_id.strip()
             voices.append({"id": voice_id, "label": label.strip() or voice_id.replace("-", " ").replace("_", " ").title()})
         if not voices:
-            default_voice = self.default_voice
+            default_voice = self.default_voice(provider)
             voices.append({"id": default_voice, "label": default_voice})
         return voices
 
-    @property
-    def default_voice(self) -> str:
+    def default_voice(self, provider: str | None = None) -> str:
         settings = get_settings()
-        return settings.qwen_tts_voice if settings.tts_provider == "qwen_local" else settings.openai_tts_voice
+        return settings.qwen_tts_voice if self.resolve_provider(provider) == "qwen_local" else settings.openai_tts_voice
 
-    @property
-    def model(self) -> str:
+    def model(self, provider: str | None = None) -> str:
         settings = get_settings()
-        return settings.qwen_tts_model if settings.tts_provider == "qwen_local" else settings.openai_tts_model
+        return settings.qwen_tts_model if self.resolve_provider(provider) == "qwen_local" else settings.openai_tts_model
 
-    def _fetch_service_json(self, path: str) -> dict | None:
+    def _fetch_service_json(self, path: str, provider: str | None = None) -> dict | None:
         settings = get_settings()
-        if settings.tts_provider != "qwen_local" or not settings.qwen_tts_endpoint:
+        if self.resolve_provider(provider) != "qwen_local" or not settings.qwen_tts_endpoint:
             return None
         url = settings.qwen_tts_endpoint.rsplit("/", 1)[0] + path
         try:
@@ -57,13 +63,13 @@ class TtsService:
             return None
         return payload if isinstance(payload, dict) else None
 
-    def default_params(self) -> dict | None:
+    def default_params(self, provider: str | None = None) -> dict | None:
         """Fetch the TTS service's env-configured tuning defaults, if reachable."""
-        return self._fetch_service_json("/params")
+        return self._fetch_service_json("/params", provider)
 
-    def speaker_instructs(self) -> dict | None:
+    def speaker_instructs(self, provider: str | None = None) -> dict | None:
         """Fetch each speaker's effective default instruct, if reachable."""
-        return self._fetch_service_json("/speakers")
+        return self._fetch_service_json("/speakers", provider)
 
     def synthesize(
         self,
@@ -74,11 +80,16 @@ class TtsService:
         instruct: str | None = None,
         tts_params: dict | None = None,
         progress_callback: ProgressCallback | None = None,
+        provider: str | None = None,
     ) -> Path:
-        settings = get_settings()
+        resolved_provider = self.resolve_provider(provider)
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        selected_voice = voice or self.default_voice
-        if settings.tts_provider == "qwen_local":
+        selected_voice = voice or self.default_voice(resolved_provider)
+        # A voice left over from the other provider (e.g. "Ryan" sent to OpenAI)
+        # would fail synthesis, so fall back to this provider's default instead.
+        if selected_voice not in {entry["id"] for entry in self.available_voices(resolved_provider)}:
+            selected_voice = self.default_voice(resolved_provider)
+        if resolved_provider == "qwen_local":
             return self._synthesize_qwen_local(text, output_path, selected_voice, language, instruct, tts_params, progress_callback)
         return self._synthesize_openai(text, output_path, selected_voice, instruct)
 
@@ -86,6 +97,9 @@ class TtsService:
         settings = get_settings()
         if not settings.openai_api_key:
             raise RuntimeError("OPENAI_API_KEY is not configured")
+        # OpenAI synthesis has no chunk timeline, so a sidecar left by an earlier
+        # Qwen run must not survive to describe this new audio.
+        timeline_sidecar_path(output_path).unlink(missing_ok=True)
         client = OpenAI(api_key=settings.openai_api_key)
         speech_args = {
             "model": settings.openai_tts_model,

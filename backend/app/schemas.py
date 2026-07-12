@@ -24,6 +24,7 @@ class PagePatch(BaseModel):
 
 
 class GenerateAudioRequest(BaseModel):
+    provider: str | None = None
     voice: str | None = None
     language: str | None = None
     instruct: str | None = None
@@ -31,6 +32,7 @@ class GenerateAudioRequest(BaseModel):
 
 
 class RenderVideoRequest(BaseModel):
+    provider: str | None = None
     voice: str | None = None
     language: str | None = None
     instruct: str | None = None

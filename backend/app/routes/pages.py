@@ -2,7 +2,6 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.orm import Session
 from ..database import SessionLocal, get_db
 from ..models import Job, Page
-from ..config import get_settings
 from ..schemas import GenerateAudioRequest, JobCreated, PageOut, PagePatch, TtsConfigOut
 from ..services.tts_service import TtsService
 from ..services.video_service import VideoService
@@ -54,16 +53,19 @@ def update_page(page_id: int, payload: PagePatch, db: Session = Depends(get_db))
 
 
 @router.get("/api/tts/config", response_model=TtsConfigOut)
-def get_tts_config() -> TtsConfigOut:
-    settings = get_settings()
+def get_tts_config(provider: str | None = None) -> TtsConfigOut:
     service = TtsService()
+    try:
+        resolved = service.resolve_provider(clean_tts_value(provider))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return TtsConfigOut(
-        provider=settings.tts_provider,
-        model=service.model,
-        default_voice=service.default_voice,
-        voices=service.available_voices(),
-        params=service.default_params(),
-        speaker_instructs=service.speaker_instructs(),
+        provider=resolved,
+        model=service.model(resolved),
+        default_voice=service.default_voice(resolved),
+        voices=service.available_voices(resolved),
+        params=service.default_params(resolved),
+        speaker_instructs=service.speaker_instructs(resolved),
     )
 
 
@@ -83,6 +85,7 @@ def generate_audio(page_id: int, payload: GenerateAudioRequest | None = None, db
             clean_tts_value(payload.language) if payload else None,
             clean_tts_value(payload.instruct) if payload else None,
             payload.tts_params if payload else None,
+            provider=clean_tts_value(payload.provider) if payload else None,
         )
     except RuntimeError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -117,6 +120,7 @@ def generate_audio_job(
         clean_tts_value(payload.language) if payload else None,
         clean_tts_value(payload.instruct) if payload else None,
         payload.tts_params if payload else None,
+        clean_tts_value(payload.provider) if payload else None,
     )
     return JobCreated(job_id=job.id)
 
@@ -139,6 +143,7 @@ def run_generate_audio_job(
     language: str | None = None,
     instruct: str | None = None,
     tts_params: dict | None = None,
+    provider: str | None = None,
 ) -> None:
     db = SessionLocal()
     try:
@@ -164,7 +169,7 @@ def run_generate_audio_job(
             finally:
                 session.close()
 
-        TtsService().synthesize(page.transcript, audio_path, voice, language, instruct, tts_params, progress_callback=report_tts_progress)
+        TtsService().synthesize(page.transcript, audio_path, voice, language, instruct, tts_params, progress_callback=report_tts_progress, provider=provider)
         update_audio_job(db, job, progress=85)
         page.audio_path = str(audio_path)
         page.audio_duration = VideoService().probe_duration(audio_path)

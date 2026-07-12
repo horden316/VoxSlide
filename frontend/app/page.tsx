@@ -151,6 +151,11 @@ const fallbackTtsDefaults: Record<string, TtsParamValue> = {
   edge_fade_ms: 10,
 };
 
+const providerOptions = [
+  {id: "qwen_local", label: "Qwen (local GPU)"},
+  {id: "openai", label: "OpenAI"},
+];
+
 const languageOptions = [
   {id: "", label: "Speaker default"},
   {id: "Chinese", label: "Chinese"},
@@ -176,6 +181,7 @@ export default function Home() {
   const [jobProgress, setJobProgress] = useState(0);
   const [jobStatus, setJobStatus] = useState("");
   const [ttsConfig, setTtsConfig] = useState<TtsConfig | null>(null);
+  const [selectedProvider, setSelectedProvider] = useState("");
   const [selectedVoice, setSelectedVoice] = useState("");
   const [selectedLanguage, setSelectedLanguage] = useState("");
   const [selectedTonePreset, setSelectedTonePreset] = useState(tonePresets[0].id);
@@ -230,6 +236,19 @@ export default function Home() {
 
   const ttsDefaults = ttsConfig?.params ?? fallbackTtsDefaults;
   const overrideCount = Object.values(paramOverrides).filter((value) => value.trim() !== "").length;
+  // Language, sampling params, and seed reroll only exist on the Qwen service.
+  const isQwenProvider = ttsConfig?.provider === "qwen_local";
+
+  async function changeProvider(providerId: string) {
+    setSelectedProvider(providerId);
+    try {
+      const config = await api.getTtsConfig(providerId);
+      setTtsConfig(config);
+      setSelectedVoice(config.default_voice);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not load TTS config.");
+    }
+  }
 
   function setParamOverride(key: string, value: string) {
     setParamOverrides((current) => {
@@ -260,10 +279,11 @@ export default function Home() {
 
   function ttsOptions(): TtsOptions {
     return {
+      provider: selectedProvider || undefined,
       voice: selectedVoice || undefined,
-      language: selectedLanguage || undefined,
+      language: (isQwenProvider && selectedLanguage) || undefined,
       instruct: voiceInstruct.trim() || undefined,
-      tts_params: collectTtsParams(),
+      tts_params: isQwenProvider ? collectTtsParams() : undefined,
     };
   }
 
@@ -288,6 +308,7 @@ export default function Home() {
       .getTtsConfig()
       .then((config) => {
         setTtsConfig(config);
+        setSelectedProvider(config.provider);
         setSelectedVoice(config.default_voice);
       })
       .catch((error) => setMessage(error.message));
@@ -546,7 +567,21 @@ export default function Home() {
                     {ttsConfig.provider} / {ttsConfig.model}
                   </div>
                 </div>
-                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+                  <label className="text-xs font-medium text-slate-600">
+                    Provider
+                    <select
+                      className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2 py-2 text-sm text-slate-900 outline-none focus:border-slate-700"
+                      value={selectedProvider}
+                      onChange={(event) => changeProvider(event.target.value)}
+                    >
+                      {providerOptions.map((provider) => (
+                        <option key={provider.id} value={provider.id}>
+                          {provider.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                   <label className="text-xs font-medium text-slate-600">
                     Voice
                     <select
@@ -561,6 +596,7 @@ export default function Home() {
                       ))}
                     </select>
                   </label>
+                  {isQwenProvider && (
                   <label className="text-xs font-medium text-slate-600">
                     Language
                     <select
@@ -575,6 +611,7 @@ export default function Home() {
                       ))}
                     </select>
                   </label>
+                  )}
                   <label className="text-xs font-medium text-slate-600">
                     Tone preset
                     <select
@@ -619,6 +656,7 @@ export default function Home() {
                 />
               </label>
 
+              {isQwenProvider && (
               <div className="mt-3 border-t border-slate-200 pt-3">
                 <button
                   className="inline-flex items-center gap-2 text-xs font-medium text-slate-600 hover:text-slate-900"
@@ -689,6 +727,7 @@ export default function Home() {
                   </div>
                 )}
               </div>
+              )}
             </div>
           )}
 
@@ -752,6 +791,7 @@ export default function Home() {
                           <Play size={16} />
                           <span>{audioJob?.pageId === page.id ? "Generating" : "Audio"}</span>
                         </button>
+                        {isQwenProvider && (
                         <button
                           className="inline-flex items-center gap-2 rounded-md border border-emerald-700 px-3 py-2 text-sm text-emerald-800 disabled:opacity-60"
                           onClick={() => rerollAudio(page)}
@@ -761,8 +801,10 @@ export default function Home() {
                           <Dices size={16} />
                           <span>Reroll</span>
                         </button>
+                        )}
                       </div>
                     </div>
+                    {isQwenProvider && (
                     <div className="mb-1 flex justify-end">
                       <button
                         className="inline-flex items-center gap-1 rounded border border-dashed border-slate-300 px-2 py-1 font-mono text-xs text-slate-500 hover:border-slate-500 hover:text-slate-900"
@@ -773,6 +815,7 @@ export default function Home() {
                         <span>[pause]</span>
                       </button>
                     </div>
+                    )}
                     <textarea
                       ref={(element) => {
                         transcriptRefs.current[page.id] = element;
