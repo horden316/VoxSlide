@@ -11,11 +11,12 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-RUN pip install --no-cache-dir torch==2.13.0 --index-url https://download.pytorch.org/whl/cpu
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY server.py .
 EXPOSE 7861
 
-CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "7861"]
+# Each worker process loads its own model copy; at 82M that is cheap, and
+# parallel workers are what let a whole deck synthesize concurrently.
+CMD ["sh", "-c", "uvicorn server:app --host 0.0.0.0 --port 7861 --workers ${KOKORO_TTS_WORKERS:-1}"]

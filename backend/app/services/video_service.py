@@ -46,12 +46,18 @@ class VideoService:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         settings = get_settings()
         video_options = self._video_encoder_options(settings.video_encoder)
+        # Stills carry no motion, so a low framerate cuts encode time ~3x with
+        # no visible difference. -shortest overshoots by seconds at low fps,
+        # so the segment is cut to the probed audio length instead.
+        audio_duration = self.probe_duration(audio_path)
         self._run(
             [
                 "ffmpeg",
                 "-y",
                 "-loop",
                 "1",
+                "-framerate",
+                str(settings.video_fps),
                 "-i",
                 str(image_path),
                 "-i",
@@ -63,7 +69,8 @@ class VideoService:
                 "192k",
                 "-pix_fmt",
                 "yuv420p",
-                "-shortest",
+                "-t",
+                f"{audio_duration:.3f}",
                 str(output_path),
             ]
         )

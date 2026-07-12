@@ -24,10 +24,16 @@ class Settings(BaseSettings):
     video_width: int = Field(default=1920)
     video_height: int = Field(default=1080)
     video_encoder: str = "h264_nvenc"
+    # Slide segments are still images; 6fps keeps players happy while cutting
+    # encode time ~3x versus the ffmpeg default 25fps.
+    video_fps: int = Field(default=6, ge=1)
     video_segment_workers: int = Field(default=4, ge=1)
     # Slightly above QWEN_TTS_WORKERS so uvicorn's random request routing
     # keeps every TTS worker busy; extra requests just queue there.
     tts_workers: int = Field(default=3, ge=1)
+    # Kokoro service worker count (same env the service reads); render jobs
+    # apply the same +1 oversubscription as the Qwen pairing above.
+    kokoro_tts_workers: int = Field(default=4, ge=1)
 
 
 @lru_cache

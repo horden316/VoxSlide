@@ -235,7 +235,9 @@ def run_render_video_job(
                 pages_to_synthesize.append((page, audio_dir / f"page-{page.page_number:04d}.mp3"))
 
         if pages_to_synthesize:
-            tts_workers = min(settings.tts_workers, len(pages_to_synthesize))
+            resolved_provider = tts.resolve_provider(provider)
+            concurrency = settings.kokoro_tts_workers + 1 if resolved_provider == "kokoro_local" else settings.tts_workers
+            tts_workers = min(concurrency, len(pages_to_synthesize))
             with ThreadPoolExecutor(max_workers=tts_workers) as executor:
                 futures = {
                     executor.submit(
