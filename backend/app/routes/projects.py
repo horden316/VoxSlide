@@ -1,5 +1,6 @@
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import json
 import shutil
 from threading import Lock
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
@@ -10,7 +11,7 @@ from ..database import SessionLocal, get_db
 from ..models import Job, Page, Project
 from ..schemas import JobCreated, ProjectCreate, ProjectOut, RenderVideoRequest
 from ..services.pdf_service import PdfService
-from ..services.tts_service import TtsService
+from ..services.tts_service import TtsService, timeline_sidecar_path
 from ..services.video_service import VideoService
 from ..storage import project_dir, safe_storage_path, unique_filename
 
@@ -133,6 +134,18 @@ def download_subtitle(project_id: int, db: Session = Depends(get_db)) -> FileRes
     if not path.exists():
         raise HTTPException(status_code=404, detail="Subtitle file not found")
     return FileResponse(path, media_type="application/x-subrip", filename=f"project-{project.id}-final.srt")
+
+
+def load_timeline(audio_path: Path) -> list[dict] | None:
+    """Read the per-chunk timing sidecar saved next to synthesized audio, if any."""
+    sidecar = timeline_sidecar_path(audio_path)
+    if not sidecar.exists():
+        return None
+    try:
+        data = json.loads(sidecar.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return data if isinstance(data, list) and data else None
 
 
 def update_job(db: Session, job: Job, status: str | None = None, progress: int | None = None, error: str | None = None) -> None:
@@ -272,6 +285,7 @@ def run_render_video_job(
                 page.transcript,
                 page.audio_duration,
                 video.probe_duration(segments_by_page[page.page_number]),
+                load_timeline(safe_storage_path(page.audio_path)),
             )
             for page in pages
         ]

@@ -13,6 +13,11 @@ from .pause_markers import strip_pause_markers
 ProgressCallback = Callable[[int, int], None]
 
 
+def timeline_sidecar_path(audio_path: Path) -> Path:
+    """Where the per-chunk timing metadata for an audio file lives."""
+    return audio_path.with_suffix(".timeline.json")
+
+
 class TtsService:
     def available_voices(self) -> list[dict[str, str]]:
         settings = get_settings()
@@ -96,6 +101,7 @@ class TtsService:
             "voice": voice,
             "response_format": "mp3",
             "request_id": request_id,
+            "include_timeline": True,
         }
         if language:
             request_payload["language"] = language
@@ -108,6 +114,10 @@ class TtsService:
             headers={"Content-Type": "application/json", "Accept": "audio/mpeg,application/json"},
             method="POST",
         )
+        # Drop any timing metadata from a previous synthesis so a stale sidecar
+        # can never describe freshly generated audio.
+        timeline_path = timeline_sidecar_path(output_path)
+        timeline_path.unlink(missing_ok=True)
         stop_polling = threading.Event()
         poller: threading.Thread | None = None
         if progress_callback:
@@ -130,7 +140,7 @@ class TtsService:
                 poller.join(timeout=3)
 
         if "application/json" in content_type:
-            self._write_audio_from_json(body, output_path)
+            self._write_audio_from_json(body, output_path, timeline_path)
         else:
             output_path.write_bytes(body)
         return output_path
@@ -151,11 +161,14 @@ class TtsService:
                 # Progress reporting must never break synthesis.
                 continue
 
-    def _write_audio_from_json(self, body: bytes, output_path: Path) -> None:
+    def _write_audio_from_json(self, body: bytes, output_path: Path, timeline_path: Path | None = None) -> None:
         try:
             payload = json.loads(body.decode("utf-8"))
         except json.JSONDecodeError as exc:
             raise RuntimeError("Qwen TTS returned invalid JSON") from exc
+        timeline = payload.get("timeline")
+        if timeline_path is not None and isinstance(timeline, list) and timeline:
+            timeline_path.write_text(json.dumps(timeline, ensure_ascii=False), encoding="utf-8")
         audio_base64 = payload.get("audio_base64") or payload.get("audio")
         audio_url = payload.get("audio_url") or payload.get("url")
         if audio_base64:

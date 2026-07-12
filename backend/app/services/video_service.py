@@ -11,6 +11,11 @@ class VideoService:
     PARAGRAPH_PAUSE_MS = 1000
     # Approximate speech rate used to convert pause seconds into caption weight units.
     PAUSE_WEIGHT_CHARS_PER_SECOND = 4.0
+    # Cue sizing follows common subtitle conventions: 42 width units per line
+    # (Latin chars count 1, CJK chars 2), at most two lines per cue.
+    MAX_LINE_WIDTH = 42
+    MAX_CUE_WIDTH = 84
+    CJK_WIDE = re.compile(r"[　-〿぀-ヿ㐀-䶿一-鿿가-힯＀-￯]")
 
     def _run(self, command: list[str]) -> None:
         result = subprocess.run(command, capture_output=True, text=True, check=False)
@@ -94,69 +99,121 @@ class VideoService:
         )
         return output_path
 
-    def write_srt(self, captions: list[tuple[str, float, float]], output_path: Path) -> Path:
+    def write_srt(
+        self,
+        captions: list[tuple[str, float, float, list[dict] | None]],
+        output_path: Path,
+    ) -> Path:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         position = 0.0
         entries: list[str] = []
         cue_index = 1
-        for text, audio_duration, slot_duration in captions:
+        for text, audio_duration, slot_duration, timeline in captions:
             audio_duration = max(audio_duration, 0.0)
             # The rendered segment can differ slightly from its audio (frame
             # rounding, encoder padding); advancing by the real slot keeps
             # later pages aligned with the concatenated video.
             slot_duration = slot_duration if slot_duration > 0 else audio_duration
             caption_span = min(audio_duration, slot_duration)
-            chunks = self._split_caption_text(text)
-            if not chunks:
-                position += slot_duration
-                continue
-            chunk_weights = [
-                self._caption_weight(chunk) + pause_seconds * self.PAUSE_WEIGHT_CHARS_PER_SECOND
-                for chunk, pause_seconds in chunks
-            ]
-            total_weight = sum(chunk_weights)
-            cue_start = position
-            caption_end = position + caption_span
-            for chunk_position, ((chunk, _), weight) in enumerate(zip(chunks, chunk_weights), start=1):
-                cue_duration = caption_span * weight / total_weight
-                cue_end = cue_start + cue_duration
-                if chunk_position == len(chunks):
-                    cue_end = caption_end
+            cues = (
+                self._cues_from_timeline(timeline, caption_span)
+                if timeline
+                else self._cues_from_weights(text, caption_span)
+            )
+            for cue_text, cue_start, cue_end in cues:
                 entries.append(
                     "\n".join(
                         [
                             str(cue_index),
-                            f"{self._format_srt_timestamp(cue_start)} --> {self._format_srt_timestamp(cue_end)}",
-                            chunk,
+                            f"{self._format_srt_timestamp(position + cue_start)} --> {self._format_srt_timestamp(position + cue_end)}",
+                            cue_text,
                         ]
                     )
                 )
                 cue_index += 1
-                cue_start = cue_end
             position += slot_duration
         output_path.write_text("\n\n".join(entries) + "\n", encoding="utf-8")
         return output_path
 
-    def _split_caption_text(self, text: str, max_chars: int = 48) -> list[tuple[str, float]]:
+    def _cues_from_timeline(self, timeline: list[dict], caption_span: float) -> list[tuple[str, float, float]]:
+        """Anchor cues to the synthesized chunks' measured start/end times."""
+        chunks: list[tuple[str, float, float]] = []
+        for entry in timeline:
+            chunk_text = str(entry.get("text") or "").strip()
+            try:
+                start = float(entry["start"])
+                end = float(entry["end"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if not chunk_text or end <= start or start >= caption_span:
+                continue
+            chunks.append((chunk_text, start, min(end, caption_span)))
+        cues: list[tuple[str, float, float]] = []
+        for index, (chunk_text, start, end) in enumerate(chunks):
+            # Keep the cue visible through the silence gap after its chunk, the
+            # same way weight-based cues covered pauses.
+            display_end = chunks[index + 1][1] if index + 1 < len(chunks) else caption_span
+            display_end = max(display_end, end)
+            cue_texts = self._chunk_caption_segment(chunk_text, self.MAX_CUE_WIDTH)
+            if not cue_texts:
+                continue
+            # Within one chunk there is continuous speech, so character-weight
+            # interpolation is a close approximation between the hard anchors.
+            weights = [self._caption_weight(cue_text) for cue_text in cue_texts]
+            total_weight = sum(weights)
+            speech_span = max(end - start, 0.0)
+            cue_start = start
+            for cue_position, (cue_text, weight) in enumerate(zip(cue_texts, weights), start=1):
+                cue_end = (
+                    display_end
+                    if cue_position == len(cue_texts)
+                    else cue_start + speech_span * weight / total_weight
+                )
+                cues.append((self._wrap_cue_lines(cue_text), cue_start, cue_end))
+                cue_start = cue_end
+        return cues
+
+    def _cues_from_weights(self, text: str, caption_span: float) -> list[tuple[str, float, float]]:
+        """Fallback for audio without timing metadata: distribute by character weight."""
+        chunks = self._split_caption_text(text)
+        if not chunks:
+            return []
+        chunk_weights = [
+            self._caption_weight(chunk) + pause_seconds * self.PAUSE_WEIGHT_CHARS_PER_SECOND
+            for chunk, pause_seconds in chunks
+        ]
+        total_weight = sum(chunk_weights)
+        cues: list[tuple[str, float, float]] = []
+        cue_start = 0.0
+        for chunk_position, ((chunk, _), weight) in enumerate(zip(chunks, chunk_weights), start=1):
+            cue_end = (
+                caption_span
+                if chunk_position == len(chunks)
+                else cue_start + caption_span * weight / total_weight
+            )
+            cues.append((self._wrap_cue_lines(chunk), cue_start, cue_end))
+            cue_start = cue_end
+        return cues
+
+    def _split_caption_text(self, text: str) -> list[tuple[str, float]]:
         """Split into caption chunks, each paired with the pause seconds that follow it."""
         annotated = re.sub(r"\n\s*\n+", f" [pause:{self.PARAGRAPH_PAUSE_MS}] ", text.strip())
         chunks: list[tuple[str, float]] = []
         position = 0
         for match in PAUSE_MARKER.finditer(annotated):
             pause_ms = int(match.group(1)) if match.group(1) else PAUSE_DEFAULT_MS
-            self._append_caption_segment(chunks, annotated[position : match.start()], max_chars, pause_ms / 1000)
+            self._append_caption_segment(chunks, annotated[position : match.start()], pause_ms / 1000)
             position = match.end()
-        self._append_caption_segment(chunks, annotated[position:], max_chars, 0.0)
+        self._append_caption_segment(chunks, annotated[position:], 0.0)
         return chunks
 
     def _append_caption_segment(
         self,
         chunks: list[tuple[str, float]],
         segment: str,
-        max_chars: int,
         pause_after: float,
     ) -> None:
-        segment_chunks = self._chunk_caption_segment(segment, max_chars)
+        segment_chunks = self._chunk_caption_segment(segment, self.MAX_CUE_WIDTH)
         for chunk in segment_chunks[:-1]:
             chunks.append((chunk, 0.0))
         if segment_chunks:
@@ -165,7 +222,7 @@ class VideoService:
             last_text, last_pause = chunks[-1]
             chunks[-1] = (last_text, last_pause + pause_after)
 
-    def _chunk_caption_segment(self, text: str, max_chars: int) -> list[str]:
+    def _chunk_caption_segment(self, text: str, max_width: int) -> list[str]:
         normalized = re.sub(r"\s+", " ", text.strip())
         if not normalized:
             return []
@@ -177,14 +234,14 @@ class VideoService:
         chunks: list[str] = []
         current = ""
         for sentence in sentences:
-            if len(sentence) > max_chars:
+            if self._display_width(sentence) > max_width:
                 if current:
                     chunks.append(current)
                     current = ""
-                chunks.extend(self._wrap_caption_sentence(sentence, max_chars))
+                chunks.extend(self._wrap_caption_sentence(sentence, max_width))
                 continue
             candidate = self._join_caption_parts(current, sentence)
-            if current and len(candidate) > max_chars:
+            if current and self._display_width(candidate) > max_width:
                 chunks.append(current)
                 current = sentence
             else:
@@ -210,31 +267,75 @@ class VideoService:
         clause_pauses = len(re.findall(r"[,，、:：]", chunk))
         return max(cjk_chars + latin_weight + sentence_pauses * 2.4 + clause_pauses * 0.8, 1.0)
 
-    def _wrap_caption_sentence(self, sentence: str, max_chars: int) -> list[str]:
-        if len(sentence) <= max_chars:
+    def _wrap_caption_sentence(self, sentence: str, max_width: int) -> list[str]:
+        if self._display_width(sentence) <= max_width:
             return [sentence]
         chunks: list[str] = []
         remaining = sentence
-        while len(remaining) > max_chars:
-            split_at = self._caption_split_position(remaining, max_chars)
+        while self._display_width(remaining) > max_width:
+            split_at = self._caption_split_position(remaining, max_width)
             chunks.append(remaining[:split_at].strip())
             remaining = remaining[split_at:].strip()
         if remaining:
             chunks.append(remaining)
-        if len(chunks) > 1 and len(chunks[-1]) < 16 and len(chunks[-2]) + len(chunks[-1]) + 1 <= 64:
-            chunks[-2] = f"{chunks[-2]} {chunks[-1]}"
-            chunks.pop()
+        if (
+            len(chunks) > 1
+            and self._display_width(chunks[-1]) < 16
+            and self._display_width(chunks[-2]) + self._display_width(chunks[-1]) + 1 <= max_width
+        ):
+            trailing = chunks.pop()
+            chunks[-1] = self._join_caption_parts(chunks[-1], trailing)
         return chunks
 
-    def _caption_split_position(self, text: str, max_chars: int) -> int:
-        window = text[: max_chars + 1]
+    def _caption_split_position(self, text: str, max_width: int) -> int:
+        limit = self._width_prefix_length(text, max_width)
+        window = text[: limit + 1]
         for pattern in [r"[,，、]\s*", r"\s+"]:
             matches = list(re.finditer(pattern, window))
             if matches:
                 split_at = matches[-1].end()
                 if split_at > 0:
                     return split_at
-        return max_chars
+        return max(limit, 1)
+
+    def _wrap_cue_lines(self, text: str) -> str:
+        """Break a cue that exceeds one line into two balanced lines."""
+        if self._display_width(text) <= self.MAX_LINE_WIDTH:
+            return text
+        best_split = None
+        best_balance = None
+        for match in re.finditer(r"[,，、:：]\s*|\s+", text):
+            split_at = match.end()
+            left = text[:split_at].strip()
+            right = text[split_at:].strip()
+            if not left or not right:
+                continue
+            left_width = self._display_width(left)
+            right_width = self._display_width(right)
+            if left_width > self.MAX_LINE_WIDTH or right_width > self.MAX_LINE_WIDTH:
+                continue
+            balance = abs(left_width - right_width)
+            if best_balance is None or balance < best_balance:
+                best_balance = balance
+                best_split = split_at
+        split_at = best_split if best_split is not None else self._caption_split_position(text, self.MAX_LINE_WIDTH)
+        first = text[:split_at].strip()
+        second = text[split_at:].strip()
+        if not first or not second:
+            return text
+        return f"{first}\n{second}"
+
+    def _display_width(self, text: str) -> int:
+        return sum(2 if self.CJK_WIDE.match(char) else 1 for char in text)
+
+    def _width_prefix_length(self, text: str, max_width: int) -> int:
+        """Longest prefix length (in characters) whose display width fits max_width."""
+        width = 0
+        for index, char in enumerate(text):
+            width += 2 if self.CJK_WIDE.match(char) else 1
+            if width > max_width:
+                return index
+        return len(text)
 
     def _format_srt_timestamp(self, seconds: float) -> str:
         milliseconds = round(seconds * 1000)

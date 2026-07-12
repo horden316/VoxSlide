@@ -1,3 +1,4 @@
+import base64
 from dataclasses import dataclass
 from io import BytesIO
 import json
@@ -11,7 +12,7 @@ import time
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 import numpy as np
 from pydantic import BaseModel
 import soundfile as sf
@@ -63,7 +64,9 @@ SPEAKERS = {
 PAUSE_MARKER = re.compile(r"\[pause(?::\s*(\d+)\s*(?:ms)?)?\]", re.IGNORECASE)
 # Double quotes are silent but make the model emit EOS early, truncating the chunk.
 QUOTE_CHARS = re.compile(r"[\"“”„‟«»「」『』＂]")
-SENTENCE_SPLIT = re.compile(r"(?<=[。！？!?；;.])\s*")
+# Latin '.' needs trailing whitespace so decimals ("3.14") and abbreviations
+# ("U.S.") do not get split apart with a sentence gap inserted mid-token.
+SENTENCE_SPLIT = re.compile(r"(?<=[。！？；])\s*|(?<=[!?;.])\s+")
 CJK_CHAR = re.compile(r"[　-ヿ㐀-䶿一-鿿가-힯＀-￯]")
 
 app = FastAPI(title="Qwen TTS Service")
@@ -112,6 +115,7 @@ class TtsRequest(BaseModel):
     instruct: str | None = None
     response_format: str | None = "mp3"
     request_id: str | None = None
+    include_timeline: bool = False
 
 
 @dataclass
@@ -386,12 +390,24 @@ def tts(payload: TtsRequest) -> Response:
                 )
             sample_rate = sr or 24000
             wav_parts: list[np.ndarray] = []
+            timeline: list[dict[str, Any]] = []
+            cursor_samples = 0
             for chunk_meta, audio_chunk in zip(script_chunks, audio_chunks):
                 processed = np.asarray(audio_chunk, dtype=np.float32).reshape(-1)
                 processed = apply_edge_fades(trim_edges(processed, sample_rate), sample_rate)
                 wav_parts.append(processed)
+                timeline.append(
+                    {
+                        "text": chunk_meta.text,
+                        "start": round(cursor_samples / sample_rate, 3),
+                        "end": round((cursor_samples + len(processed)) / sample_rate, 3),
+                    }
+                )
+                cursor_samples += len(processed)
                 if chunk_meta.gap_after_ms > 0:
-                    wav_parts.append(np.zeros(int(sample_rate * chunk_meta.gap_after_ms / 1000), dtype=np.float32))
+                    gap_samples = int(sample_rate * chunk_meta.gap_after_ms / 1000)
+                    wav_parts.append(np.zeros(gap_samples, dtype=np.float32))
+                    cursor_samples += gap_samples
             wav = np.concatenate(wav_parts) if wav_parts else np.array([], dtype=np.float32)
             logger.info(
                 "Generated TTS speaker=%s chars=%s chunks=%s elapsed=%.2fs",
@@ -407,4 +423,13 @@ def tts(payload: TtsRequest) -> Response:
     set_progress(payload.request_id, len(script_chunks), len(script_chunks), "completed")
     output = BytesIO()
     sf.write(output, wav, sr or 24000, format="MP3")
-    return Response(content=output.getvalue(), media_type="audio/mpeg")
+    audio_bytes = output.getvalue()
+    if payload.include_timeline:
+        return JSONResponse(
+            {
+                "audio_base64": base64.b64encode(audio_bytes).decode("ascii"),
+                "timeline": timeline,
+                "duration": round(len(wav) / (sr or 24000), 3),
+            }
+        )
+    return Response(content=audio_bytes, media_type="audio/mpeg")
