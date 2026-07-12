@@ -153,6 +153,7 @@ const fallbackTtsDefaults: Record<string, TtsParamValue> = {
 
 const providerOptions = [
   {id: "qwen_local", label: "Qwen (local GPU)"},
+  {id: "kokoro_local", label: "Kokoro (local CPU)"},
   {id: "openai", label: "OpenAI"},
 ];
 
@@ -238,6 +239,10 @@ export default function Home() {
   const overrideCount = Object.values(paramOverrides).filter((value) => value.trim() !== "").length;
   // Language, sampling params, and seed reroll only exist on the Qwen service.
   const isQwenProvider = ttsConfig?.provider === "qwen_local";
+  // Kokoro has fixed voices with no style prompt; Qwen and OpenAI both accept one.
+  const supportsInstruct = ttsConfig?.provider === "qwen_local" || ttsConfig?.provider === "openai";
+  // Both local services convert [pause] markers into real silence gaps.
+  const supportsPauseMarkers = ttsConfig?.provider === "qwen_local" || ttsConfig?.provider === "kokoro_local";
 
   async function changeProvider(providerId: string) {
     setSelectedProvider(providerId);
@@ -282,7 +287,7 @@ export default function Home() {
       provider: selectedProvider || undefined,
       voice: selectedVoice || undefined,
       language: (isQwenProvider && selectedLanguage) || undefined,
-      instruct: voiceInstruct.trim() || undefined,
+      instruct: (supportsInstruct && voiceInstruct.trim()) || undefined,
       tts_params: isQwenProvider ? collectTtsParams() : undefined,
     };
   }
@@ -612,6 +617,7 @@ export default function Home() {
                     </select>
                   </label>
                   )}
+                  {supportsInstruct && (
                   <label className="text-xs font-medium text-slate-600">
                     Tone preset
                     <select
@@ -626,6 +632,8 @@ export default function Home() {
                       ))}
                     </select>
                   </label>
+                  )}
+                  {supportsInstruct && (
                   <label className="text-xs font-medium text-slate-600">
                     Speed prompt
                     <select
@@ -640,8 +648,10 @@ export default function Home() {
                       ))}
                     </select>
                   </label>
+                  )}
                 </div>
               </div>
+              {supportsInstruct && (
               <label className="block text-xs font-medium text-slate-600">
                 Instruct prompt
                 <textarea
@@ -655,6 +665,7 @@ export default function Home() {
                   }
                 />
               </label>
+              )}
 
               {isQwenProvider && (
               <div className="mt-3 border-t border-slate-200 pt-3">
@@ -804,7 +815,7 @@ export default function Home() {
                         )}
                       </div>
                     </div>
-                    {isQwenProvider && (
+                    {supportsPauseMarkers && (
                     <div className="mb-1 flex justify-end">
                       <button
                         className="inline-flex items-center gap-1 rounded border border-dashed border-slate-300 px-2 py-1 font-mono text-xs text-slate-500 hover:border-slate-500 hover:text-slate-900"

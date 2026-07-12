@@ -17,6 +17,10 @@ class Settings(BaseSettings):
     qwen_tts_model: str = "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"
     qwen_tts_voice: str = "Ryan"
     qwen_tts_voices: str = "Ryan:Ryan,Aiden:Aiden,Vivian:Vivian,Serena:Serena,Uncle_Fu:Uncle Fu,Dylan:Dylan,Eric:Eric,Ono_Anna:Ono Anna,Sohee:Sohee"
+    kokoro_tts_endpoint: str | None = "http://localhost:7861/tts"
+    kokoro_tts_model: str = "hexgrad/Kokoro-82M"
+    kokoro_tts_voice: str = "af_heart"
+    kokoro_tts_voices: str = "af_heart:Heart (US female),af_bella:Bella (US female),af_nicole:Nicole (US female),af_sky:Sky (US female),am_michael:Michael (US male),am_fenrir:Fenrir (US male),am_puck:Puck (US male),bf_emma:Emma (UK female),bm_george:George (UK male),bm_fable:Fable (UK male)"
     video_width: int = Field(default=1920)
     video_height: int = Field(default=1080)
     video_encoder: str = "h264_nvenc"
