@@ -32,6 +32,7 @@ class RenderVideoRequest(BaseModel):
     voice: str | None = None
     language: str | None = None
     instruct: str | None = None
+    force_regenerate: bool = False
 
 
 class PageOut(BaseModel):

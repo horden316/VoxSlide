@@ -98,6 +98,7 @@ export default function Home() {
   const [selectedSpeedPreset, setSelectedSpeedPreset] = useState(speedPresets[1].id);
   const [voiceInstruct, setVoiceInstruct] = useState(() => buildInstruct(tonePresets[0].id, speedPresets[1].id));
   const [audioJob, setAudioJob] = useState<AudioJobState | null>(null);
+  const [forceRegenerate, setForceRegenerate] = useState(false);
   const transcriptRefs = useRef<Record<number, HTMLTextAreaElement | null>>({});
 
   const downloadUrl = useMemo(
@@ -303,7 +304,7 @@ export default function Home() {
     try {
       const savedPages = await Promise.all(pages.map((page) => api.saveTranscript(page.id, page.transcript)));
       setPages(savedPages);
-      const job = await api.renderVideo(selectedProject.id, ttsOptions());
+      const job = await api.renderVideo(selectedProject.id, ttsOptions(), forceRegenerate);
       setJobId(job.job_id);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Render failed to start.");
@@ -373,6 +374,18 @@ export default function Home() {
                   <Upload size={16} />
                   <span>Upload PDF</span>
                   <input className="hidden" type="file" accept="application/pdf" onChange={(event) => uploadPdf(event.target.files?.[0] || null)} />
+                </label>
+                <label
+                  className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium"
+                  title="Ignore existing audio and re-synthesize every page with the current voice settings."
+                >
+                  <input
+                    type="checkbox"
+                    className="accent-slate-900"
+                    checked={forceRegenerate}
+                    onChange={(event) => setForceRegenerate(event.target.checked)}
+                  />
+                  <span>Regenerate all audio</span>
                 </label>
                 <button className="inline-flex items-center gap-2 rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white" onClick={renderVideo}>
                   <FileUp size={16} />

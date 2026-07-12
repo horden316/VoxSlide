@@ -110,6 +110,7 @@ def render_video(
         clean_tts_value(payload.voice) if payload else None,
         clean_tts_value(payload.language) if payload else None,
         clean_tts_value(payload.instruct) if payload else None,
+        payload.force_regenerate if payload else False,
     )
     return JobCreated(job_id=job.id)
 
@@ -194,6 +195,7 @@ def run_render_video_job(
     voice: str | None = None,
     language: str | None = None,
     instruct: str | None = None,
+    force_regenerate: bool = False,
 ) -> None:
     db = SessionLocal()
     tts = TtsService()
@@ -219,7 +221,7 @@ def run_render_video_job(
 
         pages_to_synthesize: list[tuple[Page, Path]] = []
         for page in pages:
-            existing_audio_path = safe_storage_path(page.audio_path) if page.audio_path else None
+            existing_audio_path = None if force_regenerate else (safe_storage_path(page.audio_path) if page.audio_path else None)
             if existing_audio_path and existing_audio_path.exists():
                 if page.audio_duration is None:
                     page.audio_duration = video.probe_duration(existing_audio_path)

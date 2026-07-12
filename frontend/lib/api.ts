@@ -124,12 +124,12 @@ export const api = {
       }),
     );
   },
-  async renderVideo(projectId: number, options?: TtsOptions) {
+  async renderVideo(projectId: number, options?: TtsOptions, forceRegenerate = false) {
     return parseResponse<{job_id: number}>(
       await fetch(`${API_BASE_URL}/api/projects/${projectId}/render-video`, {
         method: "POST",
         headers: {"Content-Type": "application/json"},
-        body: JSON.stringify(options || {}),
+        body: JSON.stringify({...(options || {}), force_regenerate: forceRegenerate}),
       }),
     );
   },
