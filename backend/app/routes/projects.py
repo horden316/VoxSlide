@@ -264,7 +264,12 @@ def run_render_video_job(
         if pages_to_synthesize:
             glossary = parse_glossary(project.glossary)
             resolved_provider = tts.resolve_provider(provider)
-            concurrency = settings.kokoro_tts_workers + 1 if resolved_provider == "kokoro_local" else settings.tts_workers
+            # Bark gets no +1 oversubscription: a request queued behind a slow
+            # generation could hit the 300s synthesis timeout.
+            concurrency = {
+                "kokoro_local": settings.kokoro_tts_workers + 1,
+                "bark_local": settings.bark_tts_workers,
+            }.get(resolved_provider, settings.tts_workers)
             tts_workers = min(concurrency, len(pages_to_synthesize))
             with ThreadPoolExecutor(max_workers=tts_workers) as executor:
                 futures = {

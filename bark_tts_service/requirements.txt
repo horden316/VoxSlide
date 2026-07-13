@@ -1,0 +1,9 @@
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+# Bark ships inside transformers (BarkModel + EnCodec codec), no suno package needed.
+transformers==4.57.1
+soundfile==0.14.0
+numpy==2.4.6
+# CUDA build from PyPI (same pin as the Qwen/Kokoro services);
+# BARK_TTS_DEVICE=cpu still works with this wheel.
+torch==2.13.0

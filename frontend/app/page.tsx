@@ -154,6 +154,7 @@ const fallbackTtsDefaults: Record<string, TtsParamValue> = {
 const providerOptions = [
   {id: "qwen_local", label: "Qwen (local GPU)"},
   {id: "kokoro_local", label: "Kokoro (local CPU)"},
+  {id: "bark_local", label: "Bark (local GPU)"},
   {id: "openai", label: "OpenAI"},
 ];
 
@@ -252,8 +253,10 @@ export default function Home() {
 
   const ttsDefaults = ttsConfig?.params ?? fallbackTtsDefaults;
   const overrideCount = Object.values(paramOverrides).filter((value) => value.trim() !== "").length;
-  // Language, sampling params, and seed reroll only exist on the Qwen service.
+  // Language and the advanced sampling params only exist on the Qwen service.
   const isQwenProvider = ttsConfig?.provider === "qwen_local";
+  // Seed reroll works on any seeded sampling service: Qwen and Bark.
+  const supportsReroll = ttsConfig?.provider === "qwen_local" || ttsConfig?.provider === "bark_local";
   // Kokoro has fixed voices with no style prompt; Qwen and OpenAI both accept one.
   const supportsInstruct = ttsConfig?.provider === "qwen_local" || ttsConfig?.provider === "openai";
 
@@ -897,7 +900,7 @@ export default function Home() {
                           <Play size={16} />
                           <span>{audioJob?.pageId === page.id ? "Generating" : "Audio"}</span>
                         </button>
-                        {isQwenProvider && (
+                        {supportsReroll && (
                         <button
                           className="inline-flex items-center gap-2 rounded-md border border-emerald-700 px-3 py-2 text-sm text-emerald-800 disabled:opacity-60"
                           onClick={() => rerollAudio(page)}

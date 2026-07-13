@@ -20,6 +20,8 @@ The bundled Qwen service exposes the CustomVoice speakers `Ryan`, `Aiden`, `Vivi
 
 To use OpenAI TTS instead, set `TTS_PROVIDER=openai` and set `OPENAI_API_KEY`. Do not commit real keys.
 
+A local `bark-tts` service (Suno Bark via `transformers`) is also bundled; select the Bark provider in the UI or set `TTS_PROVIDER=bark_local`. Bark's sampling makes each take different, so the per-page Reroll button (shared with Qwen) regenerates with a fresh seed until a take sounds right.
+
 ## Run
 
 ```bash

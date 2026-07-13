@@ -53,6 +53,34 @@ services:
     ports:
       - "7861:7861"
 
+  bark-tts:
+    build:
+      context: ./bark_tts_service
+    environment:
+      - BARK_TTS_MODEL=${BARK_TTS_MODEL:-suno/bark}
+      - BARK_TTS_DEVICE=${BARK_TTS_DEVICE:-cuda:0}
+      - BARK_TTS_SEED=${BARK_TTS_SEED:-316}
+      - BARK_TTS_DO_SAMPLE=${BARK_TTS_DO_SAMPLE:-true}
+      - BARK_TTS_SEMANTIC_TEMPERATURE=${BARK_TTS_SEMANTIC_TEMPERATURE:-0.7}
+      - BARK_TTS_COARSE_TEMPERATURE=${BARK_TTS_COARSE_TEMPERATURE:-0.7}
+      - BARK_TTS_FINE_TEMPERATURE=${BARK_TTS_FINE_TEMPERATURE:-0.5}
+      - BARK_TTS_MAX_CHARS_PER_CHUNK=${BARK_TTS_MAX_CHARS_PER_CHUNK:-220}
+      - BARK_TTS_MIN_CHUNK_CHARS=${BARK_TTS_MIN_CHUNK_CHARS:-0}
+      - BARK_TTS_SENTENCE_GAP_MS=${BARK_TTS_SENTENCE_GAP_MS:-700}
+      - BARK_TTS_SEMICOLON_GAP_MS=${BARK_TTS_SEMICOLON_GAP_MS:-350}
+      - BARK_TTS_PARAGRAPH_GAP_MS=${BARK_TTS_PARAGRAPH_GAP_MS:-1000}
+      - BARK_TTS_WRAP_GAP_MS=${BARK_TTS_WRAP_GAP_MS:-150}
+      - BARK_TTS_PAUSE_DEFAULT_MS=${BARK_TTS_PAUSE_DEFAULT_MS:-1000}
+      - BARK_TTS_TRIM_THRESHOLD_DB=${BARK_TTS_TRIM_THRESHOLD_DB:--42}
+      - BARK_TTS_TRIM_PAD_MS=${BARK_TTS_TRIM_PAD_MS:-15}
+      - BARK_TTS_EDGE_FADE_MS=${BARK_TTS_EDGE_FADE_MS:-10}
+      - BARK_TTS_WORKERS=${BARK_TTS_WORKERS:-1}
+    volumes:
+      - ./storage/models:/models
+    gpus: all
+    ports:
+      - "7862:7862"
+
   backend:
     build:
       context: ./backend
@@ -72,6 +100,11 @@ services:
       - KOKORO_TTS_WORKERS=${KOKORO_TTS_WORKERS:-4}
       - KOKORO_TTS_VOICE=${KOKORO_TTS_VOICE:-af_heart}
       - KOKORO_TTS_VOICES=${KOKORO_TTS_VOICES:-af_heart:Heart (US female),af_bella:Bella (US female),af_nicole:Nicole (US female),af_sky:Sky (US female),am_michael:Michael (US male),am_fenrir:Fenrir (US male),am_puck:Puck (US male),bf_emma:Emma (UK female),bm_george:George (UK male),bm_fable:Fable (UK male)}
+      - BARK_TTS_ENDPOINT=${BARK_TTS_ENDPOINT:-http://bark-tts:7862/tts}
+      - BARK_TTS_MODEL=${BARK_TTS_MODEL:-suno/bark}
+      - BARK_TTS_WORKERS=${BARK_TTS_WORKERS:-1}
+      - BARK_TTS_VOICE=${BARK_TTS_VOICE:-v2/en_speaker_6}
+      - BARK_TTS_VOICES=${BARK_TTS_VOICES:-v2/en_speaker_6:English Speaker 6,v2/en_speaker_9:English Speaker 9,v2/en_speaker_3:English Speaker 3,v2/zh_speaker_1:Chinese Speaker 1,v2/zh_speaker_4:Chinese Speaker 4,v2/zh_speaker_9:Chinese Speaker 9,v2/ja_speaker_3:Japanese Speaker 3,v2/ko_speaker_0:Korean Speaker 0}
       - OPENAI_TTS_MODEL=${OPENAI_TTS_MODEL:-gpt-4o-mini-tts}
       - OPENAI_TTS_VOICE=${OPENAI_TTS_VOICE:-alloy}
       - OPENAI_TTS_VOICES=${OPENAI_TTS_VOICES:-alloy:Alloy,ash:Ash,ballad:Ballad,coral:Coral,echo:Echo,fable:Fable,nova:Nova,onyx:Onyx,sage:Sage,shimmer:Shimmer,verse:Verse}
@@ -87,6 +120,7 @@ services:
     depends_on:
       - qwen-tts
       - kokoro-tts
+      - bark-tts
 
   frontend:
     build:
