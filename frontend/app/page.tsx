@@ -162,11 +162,9 @@ const chatterboxParamGroups: {title: string; fields: TtsParamField[]}[] = [
     title: "Sampling",
     fields: [
       {key: "temperature", label: "Temperature", step: 0.05},
-      {key: "cfg_weight", label: "CFG weight (pace)", step: 0.05},
-      {key: "exaggeration", label: "Exaggeration (emotion)", step: 0.05},
-      {key: "repetition_penalty", label: "Repetition penalty", step: 0.05},
-      {key: "min_p", label: "Min-p", step: 0.01},
       {key: "top_p", label: "Top-p", step: 0.05},
+      {key: "top_k", label: "Top-k", step: 10},
+      {key: "repetition_penalty", label: "Repetition penalty", step: 0.05},
       {key: "seed", label: "Seed", step: 1},
     ],
   },
@@ -201,11 +199,10 @@ const chatterboxParamGroups: {title: string; fields: TtsParamField[]}[] = [
 const chatterboxFallbackDefaults: Record<string, TtsParamValue> = {
   seed: 316,
   temperature: 0.8,
-  cfg_weight: 0.5,
-  exaggeration: 0.5,
+  top_p: 0.95,
+  top_k: 1000,
   repetition_penalty: 1.2,
-  min_p: 0.05,
-  top_p: 1.0,
+  norm_loudness: true,
   max_chars_per_chunk: 300,
   min_chunk_chars: 0,
   sentence_gap_ms: 700,
@@ -219,9 +216,11 @@ const chatterboxFallbackDefaults: Record<string, TtsParamValue> = {
 };
 
 // Providers that expose an "Advanced TTS parameters" panel, keyed by provider id.
+const chatterboxBooleanFields = [{key: "norm_loudness", label: "norm_loudness"}];
+
 const providerParamConfig: Record<string, ProviderParamConfig> = {
   qwen_local: {groups: qwenParamGroups, booleans: qwenBooleanFields, fallback: qwenFallbackDefaults},
-  chatterbox_local: {groups: chatterboxParamGroups, booleans: [], fallback: chatterboxFallbackDefaults},
+  chatterbox_local: {groups: chatterboxParamGroups, booleans: chatterboxBooleanFields, fallback: chatterboxFallbackDefaults},
 };
 
 const providerOptions = [

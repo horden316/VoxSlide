@@ -23,16 +23,16 @@ import soundfile as sf
 MODEL_ID = os.getenv("CHATTERBOX_TTS_MODEL", "ResembleAI/chatterbox-turbo")
 DEVICE = os.getenv("CHATTERBOX_TTS_DEVICE", "cuda:0")
 SEED = int(os.getenv("CHATTERBOX_TTS_SEED", "316"))
-# Chatterbox generate() knobs. Defaults track the ResembleAI turbo demo: a warm
-# temperature with light repetition damping keeps takes lively but articulate.
+# Chatterbox Turbo generate() knobs. The Turbo checkpoint ignores cfg_weight,
+# exaggeration, and min_p (it warns and drops them), so only the genuinely
+# effective sampling knobs are exposed here. Defaults track the ResembleAI
+# turbo demo: a warm temperature with light repetition damping.
 TEMPERATURE = float(os.getenv("CHATTERBOX_TTS_TEMPERATURE", "0.8"))
-# cfg_weight steers classifier-free guidance (pace/adherence); exaggeration is
-# the model's emotion/intensity dial. 0.5/0.5 is the neutral narration default.
-CFG_WEIGHT = float(os.getenv("CHATTERBOX_TTS_CFG_WEIGHT", "0.5"))
-EXAGGERATION = float(os.getenv("CHATTERBOX_TTS_EXAGGERATION", "0.5"))
 REPETITION_PENALTY = float(os.getenv("CHATTERBOX_TTS_REPETITION_PENALTY", "1.2"))
-MIN_P = float(os.getenv("CHATTERBOX_TTS_MIN_P", "0.05"))
-TOP_P = float(os.getenv("CHATTERBOX_TTS_TOP_P", "1.0"))
+TOP_P = float(os.getenv("CHATTERBOX_TTS_TOP_P", "0.95"))
+TOP_K = int(os.getenv("CHATTERBOX_TTS_TOP_K", "1000"))
+# norm_loudness normalizes each chunk's loudness so concatenated chunks stay even.
+NORM_LOUDNESS = os.getenv("CHATTERBOX_TTS_NORM_LOUDNESS", "true").lower() == "true"
 # Chatterbox is trained on short utterances; long chunks drift or drop words, so
 # keep chunks near one sentence and hard-wrap around ~300 chars.
 MAX_CHARS_PER_CHUNK = int(os.getenv("CHATTERBOX_TTS_MAX_CHARS_PER_CHUNK", "300"))
@@ -137,11 +137,10 @@ class TtsParams(BaseModel):
 
     seed: int = SEED
     temperature: float = TEMPERATURE
-    cfg_weight: float = CFG_WEIGHT
-    exaggeration: float = EXAGGERATION
     repetition_penalty: float = REPETITION_PENALTY
-    min_p: float = MIN_P
     top_p: float = TOP_P
+    top_k: int = TOP_K
+    norm_loudness: bool = NORM_LOUDNESS
     max_chars_per_chunk: int = MAX_CHARS_PER_CHUNK
     min_chunk_chars: int = MIN_CHUNK_CHARS
     sentence_gap_ms: int = SENTENCE_GAP_MS
@@ -386,12 +385,11 @@ def synthesize_chunk(chatterbox_model: Any, text: str, ref_path: str, params: Tt
         audio = chatterbox_model.generate(
             text,
             audio_prompt_path=ref_path,
-            exaggeration=params.exaggeration,
-            cfg_weight=params.cfg_weight,
             temperature=params.temperature,
             repetition_penalty=params.repetition_penalty,
-            min_p=params.min_p,
             top_p=params.top_p,
+            top_k=params.top_k,
+            norm_loudness=params.norm_loudness,
         )
     return np.asarray(audio.squeeze().float().cpu().numpy(), dtype=np.float32).reshape(-1)
 
