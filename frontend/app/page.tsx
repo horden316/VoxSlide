@@ -224,12 +224,16 @@ const providerParamConfig: Record<string, ProviderParamConfig> = {
 };
 
 const providerOptions = [
-  {id: "qwen_local", label: "Qwen (local GPU)"},
-  {id: "kokoro_local", label: "Kokoro (local CPU)"},
-  {id: "bark_local", label: "Bark (local GPU)"},
   {id: "chatterbox_local", label: "Chatterbox Turbo (local GPU)"},
+  {id: "qwen_local", label: "Qwen (local GPU)"},
+  {id: "kokoro_local", label: "Kokoro (local GPU)"},
+  {id: "bark_local", label: "Bark (local GPU)"},
   {id: "openai", label: "OpenAI"},
 ];
+
+// The provider the UI pre-selects on load, independent of the backend's
+// TTS_PROVIDER default. Chatterbox Turbo is the preferred default model.
+const DEFAULT_PROVIDER = "chatterbox_local";
 
 const languageOptions = [
   {id: "", label: "Speaker default"},
@@ -407,7 +411,7 @@ export default function Home() {
   useEffect(() => {
     refreshProjects().catch((error) => setMessage(error.message));
     api
-      .getTtsConfig()
+      .getTtsConfig(DEFAULT_PROVIDER)
       .then((config) => {
         setTtsConfig(config);
         setSelectedProvider(config.provider);
