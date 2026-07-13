@@ -15,7 +15,7 @@ from .script_chunks import ScriptChunk, parse_script
 
 ProgressCallback = Callable[[int, int], None]
 
-VALID_PROVIDERS = ("qwen_local", "kokoro_local", "bark_local", "openai")
+VALID_PROVIDERS = ("qwen_local", "kokoro_local", "bark_local", "chatterbox_local", "openai")
 
 
 def timeline_sidecar_path(audio_path: Path) -> Path:
@@ -36,6 +36,7 @@ class TtsService:
             "qwen_local": settings.qwen_tts_voices,
             "kokoro_local": settings.kokoro_tts_voices,
             "bark_local": settings.bark_tts_voices,
+            "chatterbox_local": settings.chatterbox_tts_voices,
             "openai": settings.openai_tts_voices,
         }[self.resolve_provider(provider)]
         voices: list[dict[str, str]] = []
@@ -57,6 +58,7 @@ class TtsService:
             "qwen_local": settings.qwen_tts_voice,
             "kokoro_local": settings.kokoro_tts_voice,
             "bark_local": settings.bark_tts_voice,
+            "chatterbox_local": settings.chatterbox_tts_voice,
             "openai": settings.openai_tts_voice,
         }[self.resolve_provider(provider)]
 
@@ -66,6 +68,7 @@ class TtsService:
             "qwen_local": settings.qwen_tts_model,
             "kokoro_local": settings.kokoro_tts_model,
             "bark_local": settings.bark_tts_model,
+            "chatterbox_local": settings.chatterbox_tts_model,
             "openai": settings.openai_tts_model,
         }[self.resolve_provider(provider)]
 
@@ -74,6 +77,7 @@ class TtsService:
         endpoint = {
             "qwen_local": settings.qwen_tts_endpoint,
             "bark_local": settings.bark_tts_endpoint,
+            "chatterbox_local": settings.chatterbox_tts_endpoint,
         }.get(self.resolve_provider(provider))
         if not endpoint:
             return None
@@ -123,6 +127,10 @@ class TtsService:
         if resolved_provider == "bark_local":
             return self._synthesize_local_service(
                 "Bark", settings.bark_tts_endpoint, text, output_path, selected_voice, language, instruct, tts_params, progress_callback
+            )
+        if resolved_provider == "chatterbox_local":
+            return self._synthesize_local_service(
+                "Chatterbox", settings.chatterbox_tts_endpoint, text, output_path, selected_voice, language, instruct, tts_params, progress_callback
             )
         return self._synthesize_openai(text, output_path, selected_voice, instruct, progress_callback)
 

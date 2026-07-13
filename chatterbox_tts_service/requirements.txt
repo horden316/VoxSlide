@@ -1,0 +1,7 @@
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+soundfile==0.14.0
+# Chatterbox Turbo lives in chatterbox.tts_turbo (added in 0.1.7). The package
+# pins its own torch==2.6.0 / transformers / numpy<2.0.0; the CUDA wheels from
+# PyPI let CHATTERBOX_TTS_DEVICE=cuda work out of the box (cpu also works).
+chatterbox-tts==0.1.7

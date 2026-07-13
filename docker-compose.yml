@@ -81,6 +81,38 @@ services:
     ports:
       - "7862:7862"
 
+  chatterbox-tts:
+    build:
+      context: ./chatterbox_tts_service
+    environment:
+      - CHATTERBOX_TTS_MODEL=${CHATTERBOX_TTS_MODEL:-ResembleAI/chatterbox-turbo}
+      - CHATTERBOX_TTS_DEVICE=${CHATTERBOX_TTS_DEVICE:-cuda:0}
+      - CHATTERBOX_TTS_SEED=${CHATTERBOX_TTS_SEED:-316}
+      - CHATTERBOX_TTS_TEMPERATURE=${CHATTERBOX_TTS_TEMPERATURE:-0.8}
+      - CHATTERBOX_TTS_CFG_WEIGHT=${CHATTERBOX_TTS_CFG_WEIGHT:-0.5}
+      - CHATTERBOX_TTS_EXAGGERATION=${CHATTERBOX_TTS_EXAGGERATION:-0.5}
+      - CHATTERBOX_TTS_REPETITION_PENALTY=${CHATTERBOX_TTS_REPETITION_PENALTY:-1.2}
+      - CHATTERBOX_TTS_MIN_P=${CHATTERBOX_TTS_MIN_P:-0.05}
+      - CHATTERBOX_TTS_TOP_P=${CHATTERBOX_TTS_TOP_P:-1.0}
+      - CHATTERBOX_TTS_MAX_CHARS_PER_CHUNK=${CHATTERBOX_TTS_MAX_CHARS_PER_CHUNK:-300}
+      - CHATTERBOX_TTS_MIN_CHUNK_CHARS=${CHATTERBOX_TTS_MIN_CHUNK_CHARS:-0}
+      - CHATTERBOX_TTS_SENTENCE_GAP_MS=${CHATTERBOX_TTS_SENTENCE_GAP_MS:-700}
+      - CHATTERBOX_TTS_SEMICOLON_GAP_MS=${CHATTERBOX_TTS_SEMICOLON_GAP_MS:-350}
+      - CHATTERBOX_TTS_PARAGRAPH_GAP_MS=${CHATTERBOX_TTS_PARAGRAPH_GAP_MS:-1000}
+      - CHATTERBOX_TTS_WRAP_GAP_MS=${CHATTERBOX_TTS_WRAP_GAP_MS:-150}
+      - CHATTERBOX_TTS_PAUSE_DEFAULT_MS=${CHATTERBOX_TTS_PAUSE_DEFAULT_MS:-1000}
+      - CHATTERBOX_TTS_TRIM_THRESHOLD_DB=${CHATTERBOX_TTS_TRIM_THRESHOLD_DB:--42}
+      - CHATTERBOX_TTS_TRIM_PAD_MS=${CHATTERBOX_TTS_TRIM_PAD_MS:-15}
+      - CHATTERBOX_TTS_EDGE_FADE_MS=${CHATTERBOX_TTS_EDGE_FADE_MS:-10}
+      - CHATTERBOX_TTS_VOICE=${CHATTERBOX_TTS_VOICE:-female_warm}
+      - CHATTERBOX_TTS_VOICE_REFS=${CHATTERBOX_TTS_VOICE_REFS:-}
+      - CHATTERBOX_TTS_WORKERS=${CHATTERBOX_TTS_WORKERS:-1}
+    volumes:
+      - ./storage/models:/models
+    gpus: all
+    ports:
+      - "7863:7863"
+
   backend:
     build:
       context: ./backend
@@ -105,6 +137,11 @@ services:
       - BARK_TTS_WORKERS=${BARK_TTS_WORKERS:-1}
       - BARK_TTS_VOICE=${BARK_TTS_VOICE:-v2/en_speaker_6}
       - BARK_TTS_VOICES=${BARK_TTS_VOICES:-v2/en_speaker_6:English Speaker 6,v2/en_speaker_9:English Speaker 9,v2/en_speaker_3:English Speaker 3,v2/zh_speaker_1:Chinese Speaker 1,v2/zh_speaker_4:Chinese Speaker 4,v2/zh_speaker_9:Chinese Speaker 9,v2/ja_speaker_3:Japanese Speaker 3,v2/ko_speaker_0:Korean Speaker 0}
+      - CHATTERBOX_TTS_ENDPOINT=${CHATTERBOX_TTS_ENDPOINT:-http://chatterbox-tts:7863/tts}
+      - CHATTERBOX_TTS_MODEL=${CHATTERBOX_TTS_MODEL:-ResembleAI/chatterbox-turbo}
+      - CHATTERBOX_TTS_WORKERS=${CHATTERBOX_TTS_WORKERS:-1}
+      - CHATTERBOX_TTS_VOICE=${CHATTERBOX_TTS_VOICE:-female_warm}
+      - CHATTERBOX_TTS_VOICES=${CHATTERBOX_TTS_VOICES:-female_warm:Warm Female,male_calm:Calm Male,female_clear:Clear Female,male_clear:Clear Male}
       - OPENAI_TTS_MODEL=${OPENAI_TTS_MODEL:-gpt-4o-mini-tts}
       - OPENAI_TTS_VOICE=${OPENAI_TTS_VOICE:-alloy}
       - OPENAI_TTS_VOICES=${OPENAI_TTS_VOICES:-alloy:Alloy,ash:Ash,ballad:Ballad,coral:Coral,echo:Echo,fable:Fable,nova:Nova,onyx:Onyx,sage:Sage,shimmer:Shimmer,verse:Verse}
@@ -121,6 +158,7 @@ services:
       - qwen-tts
       - kokoro-tts
       - bark-tts
+      - chatterbox-tts
 
   frontend:
     build:

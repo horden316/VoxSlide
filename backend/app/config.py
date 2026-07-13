@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     kokoro_tts_endpoint: str | None = "http://localhost:7861/tts"
     kokoro_tts_model: str = "hexgrad/Kokoro-82M"
     kokoro_tts_voice: str = "af_heart"
+    chatterbox_tts_endpoint: str | None = "http://localhost:7863/tts"
+    chatterbox_tts_model: str = "ResembleAI/chatterbox-turbo"
+    chatterbox_tts_voice: str = "female_warm"
+    chatterbox_tts_voices: str = "female_warm:Warm Female,male_calm:Calm Male,female_clear:Clear Female,male_clear:Clear Male"
     bark_tts_endpoint: str | None = "http://localhost:7862/tts"
     bark_tts_model: str = "suno/bark"
     bark_tts_voice: str = "v2/en_speaker_6"
@@ -45,6 +49,9 @@ class Settings(BaseSettings):
     # Bark is slow and VRAM-hungry, so render jobs match its worker count
     # exactly: extra queued requests would risk the 300s synthesis timeout.
     bark_tts_workers: int = Field(default=1, ge=1)
+    # Chatterbox loads one model copy per worker (~3GB VRAM fp16); render jobs
+    # match its worker count exactly like Bark to avoid the synthesis timeout.
+    chatterbox_tts_workers: int = Field(default=1, ge=1)
 
 
 @lru_cache

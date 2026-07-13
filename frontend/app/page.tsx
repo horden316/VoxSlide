@@ -74,7 +74,13 @@ type TtsParamField = {
   step: number;
 };
 
-const ttsParamGroups: {title: string; fields: TtsParamField[]}[] = [
+type ProviderParamConfig = {
+  groups: {title: string; fields: TtsParamField[]}[];
+  booleans: {key: string; label: string}[];
+  fallback: Record<string, TtsParamValue>;
+};
+
+const qwenParamGroups: {title: string; fields: TtsParamField[]}[] = [
   {
     title: "Sampling (semantic layer)",
     fields: [
@@ -121,13 +127,13 @@ const ttsParamGroups: {title: string; fields: TtsParamField[]}[] = [
   },
 ];
 
-const booleanParamFields = [
+const qwenBooleanFields = [
   {key: "do_sample", label: "do_sample"},
   {key: "subtalker_dosample", label: "subtalker_dosample"},
 ];
 
-// Mirrors the docker-compose defaults; only used when /api/tts/config cannot reach the TTS service.
-const fallbackTtsDefaults: Record<string, TtsParamValue> = {
+// Mirrors the docker-compose defaults; only used when /api/tts/config cannot reach the Qwen service.
+const qwenFallbackDefaults: Record<string, TtsParamValue> = {
   seed: 316,
   do_sample: true,
   top_k: 10,
@@ -151,10 +157,78 @@ const fallbackTtsDefaults: Record<string, TtsParamValue> = {
   edge_fade_ms: 10,
 };
 
+const chatterboxParamGroups: {title: string; fields: TtsParamField[]}[] = [
+  {
+    title: "Sampling",
+    fields: [
+      {key: "temperature", label: "Temperature", step: 0.05},
+      {key: "cfg_weight", label: "CFG weight (pace)", step: 0.05},
+      {key: "exaggeration", label: "Exaggeration (emotion)", step: 0.05},
+      {key: "repetition_penalty", label: "Repetition penalty", step: 0.05},
+      {key: "min_p", label: "Min-p", step: 0.01},
+      {key: "top_p", label: "Top-p", step: 0.05},
+      {key: "seed", label: "Seed", step: 1},
+    ],
+  },
+  {
+    title: "Chunking",
+    fields: [
+      {key: "max_chars_per_chunk", label: "Max chars / chunk", step: 10},
+      {key: "min_chunk_chars", label: "Min chunk chars", step: 1},
+    ],
+  },
+  {
+    title: "Pauses (ms)",
+    fields: [
+      {key: "sentence_gap_ms", label: "Sentence gap", step: 50},
+      {key: "semicolon_gap_ms", label: "Semicolon gap", step: 50},
+      {key: "paragraph_gap_ms", label: "Paragraph gap", step: 50},
+      {key: "wrap_gap_ms", label: "Wrap gap", step: 50},
+      {key: "pause_default_ms", label: "[pause] default", step: 100},
+    ],
+  },
+  {
+    title: "Audio trim",
+    fields: [
+      {key: "trim_threshold_db", label: "Trim threshold (dB)", step: 1},
+      {key: "trim_pad_ms", label: "Trim pad (ms)", step: 5},
+      {key: "edge_fade_ms", label: "Edge fade (ms)", step: 5},
+    ],
+  },
+];
+
+// Mirrors the docker-compose defaults; only used when /api/tts/config cannot reach the Chatterbox service.
+const chatterboxFallbackDefaults: Record<string, TtsParamValue> = {
+  seed: 316,
+  temperature: 0.8,
+  cfg_weight: 0.5,
+  exaggeration: 0.5,
+  repetition_penalty: 1.2,
+  min_p: 0.05,
+  top_p: 1.0,
+  max_chars_per_chunk: 300,
+  min_chunk_chars: 0,
+  sentence_gap_ms: 700,
+  semicolon_gap_ms: 350,
+  paragraph_gap_ms: 1000,
+  wrap_gap_ms: 150,
+  pause_default_ms: 1000,
+  trim_threshold_db: -42,
+  trim_pad_ms: 15,
+  edge_fade_ms: 10,
+};
+
+// Providers that expose an "Advanced TTS parameters" panel, keyed by provider id.
+const providerParamConfig: Record<string, ProviderParamConfig> = {
+  qwen_local: {groups: qwenParamGroups, booleans: qwenBooleanFields, fallback: qwenFallbackDefaults},
+  chatterbox_local: {groups: chatterboxParamGroups, booleans: [], fallback: chatterboxFallbackDefaults},
+};
+
 const providerOptions = [
   {id: "qwen_local", label: "Qwen (local GPU)"},
   {id: "kokoro_local", label: "Kokoro (local CPU)"},
   {id: "bark_local", label: "Bark (local GPU)"},
+  {id: "chatterbox_local", label: "Chatterbox Turbo (local GPU)"},
   {id: "openai", label: "OpenAI"},
 ];
 
@@ -251,17 +325,25 @@ export default function Home() {
     }
   }
 
-  const ttsDefaults = ttsConfig?.params ?? fallbackTtsDefaults;
+  // Advanced sampling params are provider-specific; each such provider defines
+  // its own field groups and fallback defaults.
+  const paramConfig = ttsConfig ? providerParamConfig[ttsConfig.provider] : undefined;
+  const supportsParams = Boolean(paramConfig);
+  const ttsDefaults = ttsConfig?.params ?? paramConfig?.fallback ?? {};
   const overrideCount = Object.values(paramOverrides).filter((value) => value.trim() !== "").length;
-  // Language and the advanced sampling params only exist on the Qwen service.
+  // Language only exists on the Qwen service.
   const isQwenProvider = ttsConfig?.provider === "qwen_local";
-  // Seed reroll works on any seeded sampling service: Qwen and Bark.
-  const supportsReroll = ttsConfig?.provider === "qwen_local" || ttsConfig?.provider === "bark_local";
+  // Seed reroll works on any seeded sampling service: Qwen, Bark, Chatterbox.
+  const supportsReroll =
+    ttsConfig?.provider === "qwen_local" || ttsConfig?.provider === "bark_local" || ttsConfig?.provider === "chatterbox_local";
   // Kokoro has fixed voices with no style prompt; Qwen and OpenAI both accept one.
   const supportsInstruct = ttsConfig?.provider === "qwen_local" || ttsConfig?.provider === "openai";
 
   async function changeProvider(providerId: string) {
     setSelectedProvider(providerId);
+    // Overrides are keyed by param name, which differs per provider, so clear
+    // them when switching to avoid sending a stale key to the new service.
+    setParamOverrides({});
     try {
       const config = await api.getTtsConfig(providerId);
       setTtsConfig(config);
@@ -304,7 +386,7 @@ export default function Home() {
       voice: selectedVoice || undefined,
       language: (isQwenProvider && selectedLanguage) || undefined,
       instruct: (supportsInstruct && voiceInstruct.trim()) || undefined,
-      tts_params: isQwenProvider ? collectTtsParams() : undefined,
+      tts_params: supportsParams ? collectTtsParams() : undefined,
     };
   }
 
@@ -703,7 +785,7 @@ export default function Home() {
               </label>
               )}
 
-              {isQwenProvider && (
+              {supportsParams && paramConfig && (
               <div className="mt-3 border-t border-slate-200 pt-3">
                 <button
                   className="inline-flex items-center gap-2 text-xs font-medium text-slate-600 hover:text-slate-900"
@@ -732,7 +814,7 @@ export default function Home() {
                       </button>
                     </div>
                     <div className="mb-3 flex flex-wrap gap-4">
-                      {booleanParamFields.map((field) => (
+                      {paramConfig.booleans.map((field) => (
                         <label key={field.key} className="text-xs font-medium text-slate-600">
                           {field.label}
                           <select
@@ -748,7 +830,7 @@ export default function Home() {
                       ))}
                     </div>
                     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                      {ttsParamGroups.map((group) => (
+                      {paramConfig.groups.map((group) => (
                         <fieldset key={group.title} className="rounded-md border border-slate-200 p-3">
                           <legend className="px-1 text-xs font-semibold text-slate-700">{group.title}</legend>
                           <div className="grid gap-2">

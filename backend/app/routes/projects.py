@@ -269,6 +269,7 @@ def run_render_video_job(
             concurrency = {
                 "kokoro_local": settings.kokoro_tts_workers + 1,
                 "bark_local": settings.bark_tts_workers,
+                "chatterbox_local": settings.chatterbox_tts_workers,
             }.get(resolved_provider, settings.tts_workers)
             tts_workers = min(concurrency, len(pages_to_synthesize))
             with ThreadPoolExecutor(max_workers=tts_workers) as executor:
