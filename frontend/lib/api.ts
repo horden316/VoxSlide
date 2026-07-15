@@ -76,6 +76,18 @@ export type TtsOptions = {
   tts_params?: Record<string, TtsParamValue>;
 };
 
+// Server defaults for the silence padded around each page flip.
+export type VideoConfig = {
+  page_lead_in_ms: number;
+  page_tail_ms: number;
+};
+
+// Rendering also paces the slides; undefined fields fall back to VideoConfig.
+export type RenderOptions = TtsOptions & {
+  page_lead_in_ms?: number;
+  page_tail_ms?: number;
+};
+
 async function parseResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
     const payload = await response.json().catch(() => null);
@@ -103,6 +115,9 @@ export const api = {
   async getTtsConfig(provider?: string) {
     const query = provider ? `?provider=${encodeURIComponent(provider)}` : "";
     return parseResponse<TtsConfig>(await fetch(`${API_BASE_URL}/api/tts/config${query}`));
+  },
+  async getVideoConfig() {
+    return parseResponse<VideoConfig>(await fetch(`${API_BASE_URL}/api/video/config`));
   },
   async uploadPdf(projectId: number, file: File) {
     const form = new FormData();
@@ -136,7 +151,7 @@ export const api = {
       }),
     );
   },
-  async renderVideo(projectId: number, options?: TtsOptions, forceRegenerate = false) {
+  async renderVideo(projectId: number, options?: RenderOptions, forceRegenerate = false) {
     return parseResponse<{job_id: number}>(
       await fetch(`${API_BASE_URL}/api/projects/${projectId}/render-video`, {
         method: "POST",

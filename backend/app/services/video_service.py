@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from pathlib import Path
 import re
 import subprocess
@@ -5,6 +6,21 @@ import subprocess
 from ..config import get_settings
 from .pause_markers import strip_pause_markers
 from .pronunciation_markers import to_display_text
+
+
+@dataclass
+class PageCaption:
+    """One page's subtitle inputs, in seconds, as laid out in the final video."""
+
+    text: str
+    audio_duration: float
+    # Measured length of the whole rendered segment, narration plus padding.
+    slot_duration: float
+    timeline: list[dict] | None
+    # Silence before the narration inside the slot; cues shift by this much.
+    lead_in: float = 0.0
+    # Silence after the narration; only needed to reconstruct an unmeasured slot.
+    tail: float = 0.0
 
 
 class VideoService:
@@ -39,14 +55,24 @@ class VideoService:
             raise RuntimeError(result.stderr or "ffprobe failed")
         return float(result.stdout.strip())
 
-    def render_segment(self, image_path: Path, audio_path: Path, output_path: Path) -> Path:
+    def render_segment(
+        self,
+        image_path: Path,
+        audio_path: Path,
+        output_path: Path,
+        lead_in_ms: int | None = None,
+        tail_ms: int | None = None,
+    ) -> Path:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         settings = get_settings()
         video_options = self._video_encoder_options(settings.video_encoder)
+        lead_in_ms = max(settings.video_page_lead_in_ms if lead_in_ms is None else lead_in_ms, 0)
+        tail_ms = max(settings.video_page_tail_ms if tail_ms is None else tail_ms, 0)
         # Stills carry no motion, so a low framerate cuts encode time ~3x with
         # no visible difference. -shortest overshoots by seconds at low fps,
-        # so the segment is cut to the probed audio length instead.
+        # so the segment is cut to the padded audio length instead.
         audio_duration = self.probe_duration(audio_path)
+        slot_duration = lead_in_ms / 1000 + audio_duration + tail_ms / 1000
         self._run(
             [
                 "ffmpeg",
@@ -60,6 +86,7 @@ class VideoService:
                 "-i",
                 str(audio_path),
                 *video_options,
+                *self._audio_pad_options(lead_in_ms, tail_ms),
                 "-c:a",
                 "aac",
                 "-b:a",
@@ -67,11 +94,21 @@ class VideoService:
                 "-pix_fmt",
                 "yuv420p",
                 "-t",
-                f"{audio_duration:.3f}",
+                f"{slot_duration:.3f}",
                 str(output_path),
             ]
         )
         return output_path
+
+    def _audio_pad_options(self, lead_in_ms: int, tail_ms: int) -> list[str]:
+        """Hold the slide either side of its narration: adelay pushes the speech
+        back from the page flip, apad keeps the page up after it ends."""
+        filters = []
+        if lead_in_ms > 0:
+            filters.append(f"adelay=delays={lead_in_ms}:all=1")
+        if tail_ms > 0:
+            filters.append(f"apad=pad_dur={tail_ms / 1000:.3f}")
+        return ["-af", ",".join(filters)] if filters else []
 
     def _video_encoder_options(self, encoder: str) -> list[str]:
         if encoder == "h264_nvenc":
@@ -103,34 +140,40 @@ class VideoService:
         )
         return output_path
 
-    def write_srt(
-        self,
-        captions: list[tuple[str, float, float, list[dict] | None]],
-        output_path: Path,
-    ) -> Path:
+    def write_srt(self, captions: list[PageCaption], output_path: Path) -> Path:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         position = 0.0
         entries: list[str] = []
         cue_index = 1
-        for text, audio_duration, slot_duration, timeline in captions:
-            audio_duration = max(audio_duration, 0.0)
-            # The rendered segment can differ slightly from its audio (frame
-            # rounding, encoder padding); advancing by the real slot keeps
-            # later pages aligned with the concatenated video.
-            slot_duration = slot_duration if slot_duration > 0 else audio_duration
-            caption_span = min(audio_duration, slot_duration)
+        for caption in captions:
+            audio_duration = max(caption.audio_duration, 0.0)
+            lead_in = max(caption.lead_in, 0.0)
+            # The rendered segment can differ slightly from its padded audio
+            # (frame rounding, encoder padding); advancing by the real slot
+            # keeps later pages aligned with the concatenated video.
+            slot_duration = (
+                caption.slot_duration
+                if caption.slot_duration > 0
+                else lead_in + audio_duration + max(caption.tail, 0.0)
+            )
+            # Cues cover the narration only: it starts after the lead-in silence
+            # and ends before the tail silence, so both flips stay caption-free.
+            caption_span = min(audio_duration, max(slot_duration - lead_in, 0.0))
+            timeline = caption.timeline
             if not timeline:
                 # Audio predating timeline sidecars: treat the page as a single
                 # chunk so cue timing falls back to character-weight
                 # interpolation across the whole span.
-                timeline = [{"text": strip_pause_markers(text), "start": 0.0, "end": caption_span}]
+                timeline = [{"text": strip_pause_markers(caption.text), "start": 0.0, "end": caption_span}]
             cues = self._cues_from_timeline(timeline, caption_span)
+            # Timelines are relative to the narration, which the lead-in offsets.
+            speech_start = position + lead_in
             for cue_text, cue_start, cue_end in cues:
                 entries.append(
                     "\n".join(
                         [
                             str(cue_index),
-                            f"{self._format_srt_timestamp(position + cue_start)} --> {self._format_srt_timestamp(position + cue_end)}",
+                            f"{self._format_srt_timestamp(speech_start + cue_start)} --> {self._format_srt_timestamp(speech_start + cue_end)}",
                             cue_text,
                         ]
                     )

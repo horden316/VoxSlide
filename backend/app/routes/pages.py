@@ -1,8 +1,9 @@
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.orm import Session
+from ..config import get_settings
 from ..database import SessionLocal, get_db
 from ..models import Job, Page, Project
-from ..schemas import GenerateAudioRequest, JobCreated, PageOut, PagePatch, TtsConfigOut
+from ..schemas import GenerateAudioRequest, JobCreated, PageOut, PagePatch, TtsConfigOut, VideoConfigOut
 from ..services.pronunciation_markers import apply_glossary, parse_glossary
 from ..services.tts_service import TtsService
 from ..services.video_service import VideoService
@@ -73,6 +74,15 @@ def get_tts_config(provider: str | None = None) -> TtsConfigOut:
         voices=service.available_voices(resolved),
         params=service.default_params(resolved),
         speaker_instructs=service.speaker_instructs(resolved),
+    )
+
+
+@router.get("/api/video/config", response_model=VideoConfigOut)
+def get_video_config() -> VideoConfigOut:
+    settings = get_settings()
+    return VideoConfigOut(
+        page_lead_in_ms=settings.video_page_lead_in_ms,
+        page_tail_ms=settings.video_page_tail_ms,
     )
 
 

@@ -13,7 +13,7 @@ from ..schemas import GlossaryEntry, GlossaryOut, JobCreated, ProjectCreate, Pro
 from ..services.pdf_service import PdfService
 from ..services.pronunciation_markers import apply_glossary, parse_glossary
 from ..services.tts_service import TtsService, timeline_sidecar_path
-from ..services.video_service import VideoService
+from ..services.video_service import PageCaption, VideoService
 from ..storage import project_dir, safe_storage_path, unique_filename
 
 
@@ -140,6 +140,8 @@ def render_video(
         payload.tts_params if payload else None,
         payload.force_regenerate if payload else False,
         clean_tts_value(payload.provider) if payload else None,
+        payload.page_lead_in_ms if payload else None,
+        payload.page_tail_ms if payload else None,
     )
     return JobCreated(job_id=job.id)
 
@@ -227,6 +229,8 @@ def run_render_video_job(
     tts_params: dict | None = None,
     force_regenerate: bool = False,
     provider: str | None = None,
+    page_lead_in_ms: int | None = None,
+    page_tail_ms: int | None = None,
 ) -> None:
     db = SessionLocal()
     tts = TtsService()
@@ -248,6 +252,9 @@ def run_render_video_job(
         total_steps = len(pages) * 2 + 1
         completed = 0
         settings = get_settings()
+        # Resolved once so the segments and the subtitle offsets below agree.
+        lead_in_ms = max(settings.video_page_lead_in_ms if page_lead_in_ms is None else page_lead_in_ms, 0)
+        tail_ms = max(settings.video_page_tail_ms if page_tail_ms is None else page_tail_ms, 0)
         tts_progress = TtsProgressAggregator(job_id, total_steps)
 
         pages_to_synthesize: list[tuple[Page, Path]] = []
@@ -310,7 +317,7 @@ def run_render_video_job(
         max_workers = min(settings.video_segment_workers, len(render_inputs))
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = {
-                executor.submit(video.render_segment, image_path, audio_path, segment_path): page_number
+                executor.submit(video.render_segment, image_path, audio_path, segment_path, lead_in_ms, tail_ms): page_number
                 for page_number, image_path, audio_path, segment_path in render_inputs
             }
             for future in as_completed(futures):
@@ -325,11 +332,13 @@ def run_render_video_job(
         # Caption slots follow the rendered segment durations so cue timing
         # stays aligned with the concatenated video instead of drifting.
         captions = [
-            (
-                page.transcript,
-                page.audio_duration,
-                video.probe_duration(segments_by_page[page.page_number]),
-                load_timeline(safe_storage_path(page.audio_path)),
+            PageCaption(
+                text=page.transcript,
+                audio_duration=page.audio_duration,
+                slot_duration=video.probe_duration(segments_by_page[page.page_number]),
+                timeline=load_timeline(safe_storage_path(page.audio_path)),
+                lead_in=lead_in_ms / 1000,
+                tail=tail_ms / 1000,
             )
             for page in pages
         ]

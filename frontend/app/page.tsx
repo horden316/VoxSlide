@@ -1,9 +1,9 @@
 "use client";
 
 import {useEffect, useMemo, useRef, useState} from "react";
-import {BookA, ChevronDown, Dices, Download, FileText, FileUp, Play, Plus, RefreshCw, RotateCcw, Save, SlidersHorizontal, Upload, X} from "lucide-react";
+import {BookA, ChevronDown, Clock, Dices, Download, FileText, FileUp, Play, Plus, RefreshCw, RotateCcw, Save, SlidersHorizontal, Upload, X} from "lucide-react";
 import {API_BASE_URL, api} from "@/lib/api";
-import type {GlossaryEntry, Job, Project, SlidePage, TtsConfig, TtsOptions, TtsParamValue} from "@/lib/api";
+import type {GlossaryEntry, Job, Project, RenderOptions, SlidePage, TtsConfig, TtsOptions, TtsParamValue, VideoConfig} from "@/lib/api";
 
 type AudioJobState = {
   id: number;
@@ -260,6 +260,10 @@ export default function Home() {
   const [jobProgress, setJobProgress] = useState(0);
   const [jobStatus, setJobStatus] = useState("");
   const [ttsConfig, setTtsConfig] = useState<TtsConfig | null>(null);
+  const [videoConfig, setVideoConfig] = useState<VideoConfig | null>(null);
+  // Empty string = use the server default shown as the placeholder.
+  const [pageTailMs, setPageTailMs] = useState("");
+  const [pageLeadInMs, setPageLeadInMs] = useState("");
   const [selectedProvider, setSelectedProvider] = useState("");
   const [selectedVoice, setSelectedVoice] = useState("");
   const [selectedLanguage, setSelectedLanguage] = useState("");
@@ -393,6 +397,21 @@ export default function Home() {
     };
   }
 
+  function pacingValue(raw: string): number | undefined {
+    const text = raw.trim();
+    if (!text) return undefined;
+    const value = Number(text);
+    return Number.isFinite(value) && value >= 0 ? Math.round(value) : undefined;
+  }
+
+  function renderOptions(): RenderOptions {
+    return {
+      ...ttsOptions(),
+      page_lead_in_ms: pacingValue(pageLeadInMs),
+      page_tail_ms: pacingValue(pageTailMs),
+    };
+  }
+
   function updateTonePreset(presetId: string) {
     setSelectedTonePreset(presetId);
     setVoiceInstruct(buildInstruct(presetId, selectedSpeedPreset));
@@ -418,6 +437,7 @@ export default function Home() {
         setSelectedVoice(config.default_voice);
       })
       .catch((error) => setMessage(error.message));
+    api.getVideoConfig().then(setVideoConfig).catch((error) => setMessage(error.message));
   }, []);
 
   useEffect(() => {
@@ -581,7 +601,7 @@ export default function Home() {
     try {
       const savedPages = await Promise.all(pages.map((page) => api.saveTranscript(page.id, page.transcript)));
       setPages(savedPages);
-      const job = await api.renderVideo(selectedProject.id, ttsOptions(), forceRegenerate);
+      const job = await api.renderVideo(selectedProject.id, renderOptions(), forceRegenerate);
       setJobId(job.job_id);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Render failed to start.");
@@ -787,6 +807,53 @@ export default function Home() {
                 />
               </label>
               )}
+
+              <div className="mt-3 border-t border-slate-200 pt-3">
+                <div className="flex flex-wrap items-end justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="inline-flex items-center gap-2 text-xs font-medium text-slate-600">
+                      <Clock size={14} />
+                      <span>Slide pacing</span>
+                    </div>
+                    <p className="mt-1 max-w-xl text-xs text-slate-500">
+                      Silence held around every page flip. Padded in while rendering, so the page audio stays untouched and changes need no
+                      re-synthesis. Empty fields use the server defaults shown as placeholders.
+                    </p>
+                  </div>
+                  <div className="flex gap-3">
+                    <label className="text-xs font-medium text-slate-600">
+                      Hold before flip (ms)
+                      <input
+                        type="number"
+                        min={0}
+                        step={100}
+                        className={`mt-1 block w-28 rounded-md border px-2 py-1.5 text-right text-sm text-slate-900 outline-none focus:border-slate-700 ${
+                          pageTailMs ? "border-amber-400 bg-amber-50" : "border-slate-300"
+                        }`}
+                        placeholder={String(videoConfig?.page_tail_ms ?? "")}
+                        value={pageTailMs}
+                        onChange={(event) => setPageTailMs(event.target.value)}
+                        title="Keeps the finished slide on screen this long after its narration ends, before cutting to the next page."
+                      />
+                    </label>
+                    <label className="text-xs font-medium text-slate-600">
+                      Pause after flip (ms)
+                      <input
+                        type="number"
+                        min={0}
+                        step={100}
+                        className={`mt-1 block w-28 rounded-md border px-2 py-1.5 text-right text-sm text-slate-900 outline-none focus:border-slate-700 ${
+                          pageLeadInMs ? "border-amber-400 bg-amber-50" : "border-slate-300"
+                        }`}
+                        placeholder={String(videoConfig?.page_lead_in_ms ?? "")}
+                        value={pageLeadInMs}
+                        onChange={(event) => setPageLeadInMs(event.target.value)}
+                        title="Waits this long on the new slide before its narration starts."
+                      />
+                    </label>
+                  </div>
+                </div>
+              </div>
 
               {supportsParams && paramConfig && (
               <div className="mt-3 border-t border-slate-200 pt-3">

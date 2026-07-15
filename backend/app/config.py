@@ -40,6 +40,12 @@ class Settings(BaseSettings):
     # encode time ~3x versus the ffmpeg default 25fps.
     video_fps: int = Field(default=6, ge=1)
     video_segment_workers: int = Field(default=4, ge=1)
+    # Silence padded into every slide segment so the deck settles around each
+    # page flip: the tail holds the finished slide after its narration, the
+    # lead-in holds the new slide before its narration starts. Applied at
+    # render time only, so changing either needs no TTS re-synthesis.
+    video_page_lead_in_ms: int = Field(default=1000, ge=0)
+    video_page_tail_ms: int = Field(default=1000, ge=0)
     # Slightly above QWEN_TTS_WORKERS so uvicorn's random request routing
     # keeps every TTS worker busy; extra requests just queue there.
     tts_workers: int = Field(default=3, ge=1)

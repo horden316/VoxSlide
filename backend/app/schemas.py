@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Any
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class ProjectCreate(BaseModel):
@@ -47,6 +47,9 @@ class RenderVideoRequest(BaseModel):
     instruct: str | None = None
     tts_params: dict[str, Any] | None = None
     force_regenerate: bool = False
+    # Silence around each page flip; None falls back to the server defaults.
+    page_lead_in_ms: int | None = Field(default=None, ge=0)
+    page_tail_ms: int | None = Field(default=None, ge=0)
 
 
 class PageOut(BaseModel):
@@ -76,6 +79,11 @@ class JobOut(BaseModel):
 
 class JobCreated(BaseModel):
     job_id: int
+
+
+class VideoConfigOut(BaseModel):
+    page_lead_in_ms: int
+    page_tail_ms: int
 
 
 class TtsVoiceOut(BaseModel):

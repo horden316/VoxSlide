@@ -61,6 +61,7 @@ Uploaded PDFs, rendered page images, audio, SQLite DB, and final videos are stor
 - `GET /api/projects/{project_id}/pages`
 - `PATCH /api/pages/{page_id}`
 - `POST /api/pages/{page_id}/generate-audio`
+- `GET /api/video/config`
 - `POST /api/projects/{project_id}/render-video`
 - `GET /api/jobs/{job_id}`
 - `GET /api/projects/{project_id}/download`
